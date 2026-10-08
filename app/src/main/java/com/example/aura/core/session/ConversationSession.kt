@@ -1,6 +1,5 @@
 package com.example.aura.core.session
 
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -8,7 +7,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Encapsulates an active interaction session between the user and Aura.
@@ -33,12 +31,6 @@ class ConversationSession(
 
     private val _events = MutableSharedFlow<SessionEvent>(extraBufferCapacity = 64)
     val events: SharedFlow<SessionEvent> = _events.asSharedFlow()
-
-    private val activeJob = AtomicReference<Job?>(null)
-
-    fun setActiveJob(job: Job?) {
-        activeJob.set(job)
-    }
 
     fun setMode(newMode: SessionMode) {
         _mode.value = newMode
@@ -66,12 +58,9 @@ class ConversationSession(
 
     /**
      * Immediately interrupts the active agent execution (e.g. user barge-in, pause, cancel).
-     * Cancels any active coroutine job and shifts state to INTERRUPTED.
+     * Shifts state to INTERRUPTED.
      */
     fun interrupt(reason: String = "User requested interruption") {
-        val job = activeJob.getAndSet(null)
-        job?.cancel()
-
         _state.value = SessionState.INTERRUPTED
         if (_voiceState.value == VoiceState.SPEAKING || _voiceState.value == VoiceState.LISTENING) {
             _voiceState.value = VoiceState.INTERRUPTED

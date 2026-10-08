@@ -36,5 +36,12 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        if (::auraContainer.isInitialized) {
+            auraContainer.assistantManager.refreshStatus()
+        }
+    }
 }
 

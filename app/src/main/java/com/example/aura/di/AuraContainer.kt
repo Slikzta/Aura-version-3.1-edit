@@ -108,6 +108,10 @@ class AuraContainer(val context: Context) {
         }
     }
 
+    val assistantManager: com.example.aura.assistant.AuraAssistantManager by lazy {
+        com.example.aura.assistant.AuraAssistantManager(context.applicationContext)
+    }
+
     val agent: AuraAgent by lazy {
         AuraAgent(
             appContext = context.applicationContext,

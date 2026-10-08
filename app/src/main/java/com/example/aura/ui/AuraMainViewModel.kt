@@ -58,6 +58,13 @@ class AuraMainViewModel(
     val providers: StateFlow<List<ProviderConfig>> = container.providerRegistry.configs
     val activeProviderId: StateFlow<String> = container.providerRegistry.activeProviderId
 
+    // Device Assistant Role
+    val isDefaultAssistant: StateFlow<Boolean> = container.assistantManager.isDefaultAssistant
+
+    fun refreshAssistantRoleStatus(): Boolean = container.assistantManager.refreshStatus()
+    fun createRequestAssistantRoleIntent(): android.content.Intent = container.assistantManager.createRequestRoleIntent()
+    fun createManageAssistantSettingsIntent(): android.content.Intent = container.assistantManager.createManageSettingsIntent()
+
     // Room Persistence
     @OptIn(ExperimentalCoroutinesApi::class)
     val sessionMessages: StateFlow<List<MessageEntity>> = activeSession

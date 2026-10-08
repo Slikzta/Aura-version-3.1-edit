@@ -3,11 +3,11 @@ package com.example.aura.core.agent
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
-import com.example.aura.core.ModelProvider
 import com.example.aura.core.logging.AgentAuditLogger
 import com.example.aura.core.provider.ChatMessage
 import com.example.aura.core.provider.CompletionRequest
 import com.example.aura.core.provider.MessageRole
+import com.example.aura.core.provider.ModelProvider
 import com.example.aura.core.provider.ModelProviderRegistry
 import com.example.aura.core.provider.StreamChunk
 import com.example.aura.core.provider.StreamingEngine
@@ -40,7 +40,6 @@ import java.io.File
  * Aura Autonomous Agent Core Engine.
  *
  * Operates strictly decoupled from the Android UI layer and specific AI vendors.
- * Depends directly on the provider-neutral [ModelProvider] interface.
  * Coordinates the full orchestration loop:
  * UNDERSTAND → PLAN → SELECT TOOL → CHECK PERMISSION → REQUEST APPROVAL IF REQUIRED
  * → EXECUTE → OBSERVE RESULT → UPDATE STATE → CONTINUE OR RESPOND.
@@ -48,21 +47,22 @@ import java.io.File
 class AuraAgent(
     private val appContext: Context,
     private val repository: AuraRepository,
-    var modelProvider: ModelProvider,
+    private val providerRegistry: ModelProviderRegistry,
     val toolRegistry: ToolRegistry,
     val approvalManager: ApprovalManager,
     private val auditLogger: AgentAuditLogger,
     val sessionManager: SessionManager,
     val streamingEngine: StreamingEngine = StreamingEngine(),
-    val orchestrator: AuraOrchestrator = AuraOrchestrator(),
-    private val providerRegistry: ModelProviderRegistry? = null
+    val orchestrator: AuraOrchestrator = AuraOrchestrator()
 ) {
 
-    // Secondary constructor preserving existing registry-based instantiation
+    var modelProvider: ModelProvider = providerRegistry.getActiveProvider()
+        private set
+
     constructor(
         appContext: Context,
         repository: AuraRepository,
-        providerRegistry: ModelProviderRegistry,
+        modelProvider: ModelProvider,
         toolRegistry: ToolRegistry,
         approvalManager: ApprovalManager,
         auditLogger: AgentAuditLogger,
@@ -72,21 +72,26 @@ class AuraAgent(
     ) : this(
         appContext = appContext,
         repository = repository,
-        modelProvider = providerRegistry.getActiveProvider(),
+        providerRegistry = ModelProviderRegistry().apply {
+            registerProvider(modelProvider)
+            setActiveProvider(modelProvider.id)
+        },
         toolRegistry = toolRegistry,
         approvalManager = approvalManager,
         auditLogger = auditLogger,
         sessionManager = sessionManager,
         streamingEngine = streamingEngine,
-        orchestrator = orchestrator,
-        providerRegistry = providerRegistry
-    )
+        orchestrator = orchestrator
+    ) {
+        this.modelProvider = modelProvider
+    }
 
     fun updateModelProvider(newProvider: ModelProvider) {
         this.modelProvider = newProvider
     }
 
     private val agentScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private var activeJob: kotlinx.coroutines.Job? = null
 
     private val _agentState = MutableStateFlow(AgentState.IDLE)
     val agentState: StateFlow<AgentState> = _agentState.asStateFlow()
@@ -173,7 +178,7 @@ class AuraAgent(
                     availableTools = availableTools
                 )
 
-                val provider: ModelProvider = providerRegistry?.getActiveProvider() ?: modelProvider
+                val provider = modelProvider
                 auditLogger.logModelRequest(
                     sessionId = session.id,
                     providerName = provider.name,
@@ -260,10 +265,11 @@ class AuraAgent(
                     )
                 )
                 _events.tryEmit(AgentEvent.ErrorOccurred("Agent error: ${e.message}", e))
+            } finally {
+                activeJob = null
             }
         }
-
-        session.setActiveJob(job)
+        activeJob = job
     }
 
     private suspend fun handleToolCall(
@@ -424,6 +430,8 @@ class AuraAgent(
     }
 
     fun interrupt() {
+        activeJob?.cancel()
+        activeJob = null
         sessionManager.interruptActiveSession("User tap on Interrupt button")
         approvalManager.cancelAllPending()
         _agentState.value = AgentState.INTERRUPTED
