@@ -107,7 +107,11 @@ class AuraMainViewModel(
     fun setSessionMode(mode: SessionMode) {
         activeSession.value.setMode(mode)
         if (mode == SessionMode.VOICE_STREAM) {
-            container.voiceManager.startPushToTalk()
+            if (container.voiceManager.mode.value == VoiceMode.CONTINUOUS_CONVERSATION) {
+                container.voiceManager.startContinuousConversation()
+            } else {
+                container.voiceManager.startPushToTalk()
+            }
         } else {
             container.voiceManager.stopVoiceInteraction()
         }
@@ -115,7 +119,13 @@ class AuraMainViewModel(
 
     // Voice Engine Controls
     fun setVoiceMode(mode: VoiceMode) {
+        if (mode == VoiceMode.CONTINUOUS_CONVERSATION) {
+            activeSession.value.setMode(SessionMode.VOICE_STREAM)
+        }
         container.voiceManager.setMode(mode)
+        if (mode == VoiceMode.CONTINUOUS_CONVERSATION && hasRecordPermission()) {
+            container.voiceManager.startContinuousConversation()
+        }
     }
 
     fun startPushToTalk() {
@@ -127,6 +137,8 @@ class AuraMainViewModel(
     }
 
     fun startContinuousConversation() {
+        activeSession.value.setMode(SessionMode.VOICE_STREAM)
+        container.voiceManager.setMode(VoiceMode.CONTINUOUS_CONVERSATION)
         container.voiceManager.startContinuousConversation()
     }
 

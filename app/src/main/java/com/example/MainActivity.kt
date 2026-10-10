@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,7 +21,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        auraContainer = AuraContainer(applicationContext)
+        auraContainer = AuraContainer.getInstance(applicationContext)
+
+        handleAssistIntent(intent)
 
         setContent {
             AuraTheme {
@@ -37,11 +40,31 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAssistIntent(intent)
+    }
+
     override fun onResume() {
         super.onResume()
         if (::auraContainer.isInitialized) {
             auraContainer.assistantManager.refreshStatus()
         }
     }
-}
 
+    private fun handleAssistIntent(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action
+        if (action == Intent.ACTION_ASSIST ||
+            action == Intent.ACTION_VOICE_COMMAND ||
+            action == "android.intent.action.VOICE_ASSIST") {
+            if (::auraContainer.isInitialized) {
+                auraContainer.assistantManager.processAssistantInvocation(
+                    source = "MainActivity_$action",
+                    intent = intent
+                )
+            }
+        }
+    }
+}

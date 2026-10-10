@@ -4,19 +4,32 @@ import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
+import com.example.aura.core.session.ConversationSession
+import com.example.aura.core.session.SessionMode
+import com.example.aura.core.session.SessionState
+import com.example.aura.core.voice.VoiceMode
+import com.example.aura.di.AuraContainer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Manages detection and system role selection for Aura as the device's default assistant.
+ * Manages detection, system role selection, and runtime invocation dispatching
+ * for Aura as the device's default assistant.
  * Compatible with minSdk 24 up through targetSdk 36.
  */
 class AuraAssistantManager(private val context: Context) {
 
     private val _isDefaultAssistant = MutableStateFlow(checkIfDefaultAssistant())
     val isDefaultAssistant: StateFlow<Boolean> = _isDefaultAssistant.asStateFlow()
+
+    private var lastInvocationTime = 0L
+    private var lastQuery: String? = null
+
+    val lastInvocationJob: kotlinx.coroutines.Job?
+        get() = AuraContainer.getInstance(context).agent.lastJob
 
     fun refreshStatus(): Boolean {
         val current = checkIfDefaultAssistant()
@@ -88,5 +101,77 @@ class AuraAssistantManager(private val context: Context) {
                 }
             }
         }
+    }
+
+    /**
+     * Processes an assistant invocation from VoiceInteractionSession or Activity assist intent.
+     * Reuses the existing AuraAgent pipeline, SessionManager, and VoiceInteractionManager.
+     */
+    fun processAssistantInvocation(
+        source: String,
+        args: Bundle? = null,
+        intent: Intent? = null
+    ): ConversationSession {
+        val container = AuraContainer.getInstance(context)
+        val query = extractQuery(args, intent)
+
+        // Deduplication to prevent double-firing when VoiceInteractionSession launches MainActivity
+        val now = System.currentTimeMillis()
+        if (now - lastInvocationTime < 1200L && query == lastQuery && query != null) {
+            return container.sessionManager.activeSession.value
+        }
+        lastInvocationTime = now
+        lastQuery = query
+
+        // 1. Obtain or create appropriate conversation session
+        val current = container.sessionManager.activeSession.value
+        val session = if (current.state.value == SessionState.ERROR ||
+            current.state.value == SessionState.INTERRUPTED
+        ) {
+            container.sessionManager.startNewSession(SessionMode.VOICE_STREAM)
+        } else {
+            current
+        }
+        session.setMode(SessionMode.VOICE_STREAM)
+
+        // 2. Route input to agent pipeline or activate voice input
+        if (!query.isNullOrBlank()) {
+            container.agent.processUserInput(session.id, query)
+        } else {
+            // Trigger voice input on existing VoiceInteractionManager
+            container.voiceManager.setMode(VoiceMode.PUSH_TO_TALK)
+            container.voiceManager.startPushToTalk()
+        }
+
+        return session
+    }
+
+    /**
+     * Safely cancels/interrupts an ongoing assistant turn without breaking the session.
+     */
+    fun handleAssistantInterruption(reason: String = "Assistant dismissed") {
+        val container = AuraContainer.getInstance(context)
+        container.agent.interrupt()
+        container.voiceManager.stopVoiceInteraction()
+    }
+
+    /**
+     * Extracts user query text from assist bundle or intent extras.
+     */
+    fun extractQuery(args: Bundle?, intent: Intent?): String? {
+        // Try args bundle first
+        args?.getString("query")?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+        args?.getString("android.intent.extra.ASSIST_INPUT_HINT")?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+        args?.getString(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+        args?.getString("android.intent.extra.TEXT")?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+
+        // Try intent extras
+        intent?.getStringExtra("query")?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+        intent?.getStringExtra("android.intent.extra.ASSIST_INPUT_HINT")?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+        intent?.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+        intent?.getStringExtra("android.intent.extra.TEXT")?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+        intent?.data?.getQueryParameter("q")?.takeIf { it.isNotBlank() }?.let { return it.trim() }
+
+        return null
     }
 }

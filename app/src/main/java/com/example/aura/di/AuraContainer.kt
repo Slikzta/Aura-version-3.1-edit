@@ -25,7 +25,10 @@ import com.example.aura.data.repository.AuraRepository
  * Service container providing clean dependency boundaries for Aura.
  * Allows independent instantiation for testing, background services, and UI ViewModels.
  */
-class AuraContainer(val context: Context) {
+class AuraContainer(
+    val context: Context,
+    customVoiceManager: VoiceInteractionManager? = null
+) {
 
     val database: AuraDatabase by lazy {
         AuraDatabase.getInstance(context)
@@ -95,10 +98,13 @@ class AuraContainer(val context: Context) {
     }
 
     val voiceManager: VoiceInteractionManager by lazy {
-        VoiceInteractionManager(context.applicationContext).apply {
+        (customVoiceManager ?: VoiceInteractionManager(context.applicationContext)).apply {
             setCallbacks(
                 onUserInput = { text ->
                     val activeSession = sessionManager.activeSession.value
+                    if (mode.value == com.example.aura.core.voice.VoiceMode.CONTINUOUS_CONVERSATION) {
+                        activeSession.setMode(com.example.aura.core.session.SessionMode.VOICE_STREAM)
+                    }
                     agent.processUserInput(activeSession.id, text)
                 },
                 onBargeIn = {
@@ -120,7 +126,24 @@ class AuraContainer(val context: Context) {
             toolRegistry = toolRegistry,
             approvalManager = approvalManager,
             auditLogger = auditLogger,
-            sessionManager = sessionManager
+            sessionManager = sessionManager,
+            voiceManager = voiceManager
         )
+    }
+
+    companion object {
+        @Volatile
+        private var instance: AuraContainer? = null
+
+        fun getInstance(context: Context): AuraContainer {
+            return instance ?: synchronized(this) {
+                instance ?: AuraContainer(context.applicationContext).also { instance = it }
+            }
+        }
+
+        @androidx.annotation.VisibleForTesting
+        fun setInstance(customInstance: AuraContainer?) {
+            instance = customInstance
+        }
     }
 }

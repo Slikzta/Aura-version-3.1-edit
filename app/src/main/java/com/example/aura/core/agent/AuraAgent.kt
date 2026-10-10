@@ -53,7 +53,9 @@ class AuraAgent(
     private val auditLogger: AgentAuditLogger,
     val sessionManager: SessionManager,
     val streamingEngine: StreamingEngine = StreamingEngine(),
-    val orchestrator: AuraOrchestrator = AuraOrchestrator()
+    val orchestrator: AuraOrchestrator = AuraOrchestrator(),
+    val voiceManager: com.example.aura.core.voice.VoiceInteractionManager? = null,
+    private val coroutineDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Main.immediate
 ) {
 
     var modelProvider: ModelProvider = providerRegistry.getActiveProvider()
@@ -68,7 +70,9 @@ class AuraAgent(
         auditLogger: AgentAuditLogger,
         sessionManager: SessionManager,
         streamingEngine: StreamingEngine = StreamingEngine(),
-        orchestrator: AuraOrchestrator = AuraOrchestrator()
+        orchestrator: AuraOrchestrator = AuraOrchestrator(),
+        voiceManager: com.example.aura.core.voice.VoiceInteractionManager? = null,
+        coroutineDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Main.immediate
     ) : this(
         appContext = appContext,
         repository = repository,
@@ -81,7 +85,9 @@ class AuraAgent(
         auditLogger = auditLogger,
         sessionManager = sessionManager,
         streamingEngine = streamingEngine,
-        orchestrator = orchestrator
+        orchestrator = orchestrator,
+        voiceManager = voiceManager,
+        coroutineDispatcher = coroutineDispatcher
     ) {
         this.modelProvider = modelProvider
     }
@@ -90,8 +96,11 @@ class AuraAgent(
         this.modelProvider = newProvider
     }
 
-    private val agentScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    private var activeJob: kotlinx.coroutines.Job? = null
+    private val agentScope = CoroutineScope(coroutineDispatcher + SupervisorJob())
+    var activeJob: kotlinx.coroutines.Job? = null
+        private set
+    var lastJob: kotlinx.coroutines.Job? = null
+        private set
 
     private val _agentState = MutableStateFlow(AgentState.IDLE)
     val agentState: StateFlow<AgentState> = _agentState.asStateFlow()
@@ -111,7 +120,7 @@ class AuraAgent(
     /**
      * Ingests a user message and runs the autonomous agent interaction cycle.
      */
-    fun processUserInput(sessionId: String, userText: String) {
+    fun processUserInput(sessionId: String, userText: String): kotlinx.coroutines.Job {
         lastUserPrompt = userText
         val session = sessionManager.getSession(sessionId) ?: sessionManager.activeSession.value
 
@@ -227,6 +236,14 @@ class AuraAgent(
                             content = assistantText
                         )
                     )
+
+                    // Route response back through Aura's voice output system when in voice mode or continuous conversation
+                    if (session.mode.value == com.example.aura.core.session.SessionMode.VOICE_STREAM ||
+                        voiceManager?.mode?.value == com.example.aura.core.voice.VoiceMode.CONTINUOUS_CONVERSATION) {
+                        voiceManager?.speakResponse(assistantText)
+                    }
+                } else if (voiceManager?.mode?.value == com.example.aura.core.voice.VoiceMode.CONTINUOUS_CONVERSATION) {
+                    voiceManager?.resumeContinuousListening()
                 }
 
                 // Handle Tool Calls through the complete Orchestration Cycle
@@ -265,11 +282,16 @@ class AuraAgent(
                     )
                 )
                 _events.tryEmit(AgentEvent.ErrorOccurred("Agent error: ${e.message}", e))
+                if (voiceManager?.mode?.value == com.example.aura.core.voice.VoiceMode.CONTINUOUS_CONVERSATION) {
+                    voiceManager?.resumeContinuousListening()
+                }
             } finally {
                 activeJob = null
             }
         }
         activeJob = job
+        lastJob = job
+        return job
     }
 
     private suspend fun handleToolCall(
@@ -430,8 +452,10 @@ class AuraAgent(
     }
 
     fun interrupt() {
-        activeJob?.cancel()
+        val job = activeJob
         activeJob = null
+        job?.cancel()
+        voiceManager?.stopVoiceInteraction()
         sessionManager.interruptActiveSession("User tap on Interrupt button")
         approvalManager.cancelAllPending()
         _agentState.value = AgentState.INTERRUPTED

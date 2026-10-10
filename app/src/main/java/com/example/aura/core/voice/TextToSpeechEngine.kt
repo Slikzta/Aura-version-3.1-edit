@@ -39,6 +39,7 @@ class AndroidTextToSpeechEngine(
 
     private var tts: TextToSpeech? = null
     private var isInitialized = false
+    private var pendingRequest: Triple<SpeechSynthesisRequest, () -> Unit, Pair<() -> Unit, (String) -> Unit>>? = null
 
     init {
         tts = TextToSpeech(context.applicationContext, this)
@@ -48,6 +49,17 @@ class AndroidTextToSpeechEngine(
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.getDefault()
             isInitialized = true
+            val pending = pendingRequest
+            pendingRequest = null
+            pending?.let { (req, onStart, callbacks) ->
+                speak(req, onStart, callbacks.first, callbacks.second)
+            }
+        } else {
+            val pending = pendingRequest
+            pendingRequest = null
+            pending?.let { (_, _, callbacks) ->
+                callbacks.second("TTS initialization failed with code: $status")
+            }
         }
     }
 
@@ -58,6 +70,11 @@ class AndroidTextToSpeechEngine(
         onError: (String) -> Unit
     ) {
         if (!isInitialized || tts == null) {
+            if (tts != null) {
+                // Queued until onInit finishes
+                pendingRequest = Triple(request, onStart, Pair(onDone, onError))
+                return
+            }
             onError("TTS engine is not ready.")
             return
         }
@@ -89,7 +106,11 @@ class AndroidTextToSpeechEngine(
             }
         })
 
-        tts?.speak(request.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        val result = tts?.speak(request.text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        if (result != TextToSpeech.SUCCESS) {
+            _isSpeaking.value = false
+            onError("TextToSpeech speak failed with code: $result")
+        }
     }
 
     override fun stop() {

@@ -23,11 +23,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicNone
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -244,7 +244,16 @@ fun ConsoleScreen(
             VoiceControlPanel(
                 voiceMode = voiceMode,
                 engineState = voiceEngineState,
-                onSetVoiceMode = { viewModel.setVoiceMode(it) },
+                onSetVoiceMode = { mode ->
+                    viewModel.setVoiceMode(mode)
+                    if (mode == VoiceMode.CONTINUOUS_CONVERSATION) {
+                        if (!viewModel.hasRecordPermission()) {
+                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        } else {
+                            viewModel.startContinuousConversation()
+                        }
+                    }
+                },
                 onPushToTalkStart = {
                     if (!viewModel.hasRecordPermission()) {
                         micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -254,6 +263,7 @@ fun ConsoleScreen(
                 },
                 onPushToTalkStop = { viewModel.stopPushToTalk() },
                 onStartContinuous = {
+                    viewModel.setVoiceMode(VoiceMode.CONTINUOUS_CONVERSATION)
                     if (!viewModel.hasRecordPermission()) {
                         micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     } else {
@@ -496,7 +506,11 @@ fun VoiceControlPanel(
                         Text(if (engineState is VoiceEngineState.Listening) "Release to Send" else "Tap & Speak")
                     }
                 } else {
-                    if (engineState is VoiceEngineState.Listening || engineState is VoiceEngineState.Speaking) {
+                    val isContinuousActive = engineState !is VoiceEngineState.Idle &&
+                            engineState !is VoiceEngineState.Error &&
+                            engineState !is VoiceEngineState.PermissionRequired
+
+                    if (isContinuousActive) {
                         Button(
                             onClick = onStopVoice,
                             colors = ButtonDefaults.buttonColors(containerColor = AuraCriticalRed),
@@ -512,7 +526,7 @@ fun VoiceControlPanel(
                             colors = ButtonDefaults.buttonColors(containerColor = AuraSafeGreen, contentColor = Color.Black),
                             modifier = Modifier.testTag("start_continuous_voice_button")
                         ) {
-                            Icon(Icons.Default.VolumeUp, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Start Continuous Mode")
                         }

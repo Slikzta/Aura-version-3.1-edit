@@ -3,7 +3,9 @@ package com.example.aura.core.voice
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,7 +23,7 @@ class VoiceInteractionManager(
     val vad: VoiceActivityDetector = EnergyThresholdVAD(),
     val audioCaptureManager: AudioCaptureManager = AudioCaptureManager(context)
 ) {
-    private val voiceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val voiceScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
 
     private val _mode = MutableStateFlow(VoiceMode.PUSH_TO_TALK)
     val mode: StateFlow<VoiceMode> = _mode.asStateFlow()
@@ -32,14 +34,19 @@ class VoiceInteractionManager(
     private var onUserInputReady: ((String) -> Unit)? = null
     private var onBargeInTriggered: (() -> Unit)? = null
 
+    private var isContinuousRunning = false
+    private var restartJob: Job? = null
+
     fun setCallbacks(onUserInput: (String) -> Unit, onBargeIn: () -> Unit) {
         this.onUserInputReady = onUserInput
         this.onBargeInTriggered = onBargeIn
     }
 
     fun setMode(newMode: VoiceMode) {
-        stopVoiceInteraction()
-        _mode.value = newMode
+        if (_mode.value != newMode) {
+            stopVoiceInteraction()
+            _mode.value = newMode
+        }
     }
 
     /**
@@ -56,13 +63,13 @@ class VoiceInteractionManager(
 
         _engineState.value = VoiceEngineState.Listening(0f)
         sttEngine.startListening(
-            onPartialTranscription = { partial ->
+            onPartialTranscription = { _ ->
                 _engineState.value = VoiceEngineState.Listening(0.5f)
             },
             onFinalTranscription = { result ->
                 _engineState.value = VoiceEngineState.Idle
                 if (result.text.isNotBlank()) {
-                    onUserInputReady?.invoke(result.text)
+                    onUserInputReady?.invoke(result.text.trim())
                 }
             },
             onError = { error ->
@@ -90,53 +97,119 @@ class VoiceInteractionManager(
             return
         }
 
+        _mode.value = VoiceMode.CONTINUOUS_CONVERSATION
+        isContinuousRunning = true
+        startContinuousListeningCycle()
+    }
+
+    private fun startContinuousListeningCycle() {
+        if (!isContinuousRunning || _mode.value != VoiceMode.CONTINUOUS_CONVERSATION) {
+            return
+        }
+
+        restartJob?.cancel()
+        restartJob = null
+
+        // Prevent overlapping microphone capture and TTS playback to avoid audio feedback
+        if (ttsEngine.isSpeaking.value ||
+            _engineState.value is VoiceEngineState.SynthesizingSpeech ||
+            _engineState.value is VoiceEngineState.Speaking
+        ) {
+            return
+        }
+
+        // Stop previous recognition cleanly
+        audioCaptureManager.stopCapture()
+        sttEngine.stopListening()
+
         _engineState.value = VoiceEngineState.Listening(0f)
-        audioCaptureManager.startCapture(
-            scope = voiceScope,
-            vad = vad,
-            onSpeechDetected = {
-                // If TTS is currently playing when user speaks, trigger immediate BARGE-IN!
-                if (ttsEngine.isSpeaking.value) {
-                    handleBargeIn()
-                } else if (_engineState.value is VoiceEngineState.Listening) {
-                    _engineState.value = VoiceEngineState.SpeechDetected(vad.currentEnergyLevel)
-                    startSpeechRecognitionForContinuous()
+
+        sttEngine.startListening(
+            onPartialTranscription = { _ ->
+                voiceScope.launch {
+                    if (isContinuousRunning && _mode.value == VoiceMode.CONTINUOUS_CONVERSATION) {
+                        _engineState.value = VoiceEngineState.Listening(0.7f)
+                    }
+                }
+            },
+            onFinalTranscription = { result ->
+                voiceScope.launch {
+                    if (isContinuousRunning && _mode.value == VoiceMode.CONTINUOUS_CONVERSATION) {
+                        val text = result.text.trim()
+                        if (text.isNotBlank()) {
+                            // Transition to Thinking / Processing
+                            _engineState.value = VoiceEngineState.Thinking
+                            // Route recognized speech into existing conversation/agent pipeline
+                            onUserInputReady?.invoke(text)
+                        } else {
+                            // Empty transcription result, continue listening
+                            scheduleContinuousRestart(100L)
+                        }
+                    }
+                }
+            },
+            onError = { error ->
+                voiceScope.launch {
+                    if (isContinuousRunning && _mode.value == VoiceMode.CONTINUOUS_CONVERSATION) {
+                        // Recoverable errors (timeouts, no speech match) should restart listening
+                        if (error.contains("timeout", ignoreCase = true) ||
+                            error.contains("no speech", ignoreCase = true) ||
+                            error.contains("7") || error.contains("6")) {
+                            scheduleContinuousRestart(250L)
+                        } else {
+                            _engineState.value = VoiceEngineState.Error(error)
+                            scheduleContinuousRestart(1000L)
+                        }
+                    }
                 }
             }
         )
     }
 
-    private fun startSpeechRecognitionForContinuous() {
-        sttEngine.startListening(
-            onPartialTranscription = {
-                _engineState.value = VoiceEngineState.Listening(0.7f)
-            },
-            onFinalTranscription = { result ->
-                if (result.text.isNotBlank()) {
-                    _engineState.value = VoiceEngineState.Thinking
-                    onUserInputReady?.invoke(result.text)
-                } else {
-                    _engineState.value = VoiceEngineState.Listening(0f)
-                }
-            },
-            onError = {
-                _engineState.value = VoiceEngineState.Listening(0f)
+    private fun scheduleContinuousRestart(delayMillis: Long) {
+        if (!isContinuousRunning || _mode.value != VoiceMode.CONTINUOUS_CONVERSATION) return
+        restartJob?.cancel()
+        restartJob = voiceScope.launch {
+            delay(delayMillis)
+            if (isContinuousRunning &&
+                _mode.value == VoiceMode.CONTINUOUS_CONVERSATION &&
+                !ttsEngine.isSpeaking.value &&
+                _engineState.value !is VoiceEngineState.SynthesizingSpeech &&
+                _engineState.value !is VoiceEngineState.Speaking
+            ) {
+                startContinuousListeningCycle()
             }
-        )
+        }
+    }
+
+    /**
+     * Resumes continuous listening if agent processing completed without speech output.
+     */
+    fun resumeContinuousListening() {
+        voiceScope.launch {
+            if (isContinuousRunning &&
+                _mode.value == VoiceMode.CONTINUOUS_CONVERSATION &&
+                !ttsEngine.isSpeaking.value &&
+                _engineState.value !is VoiceEngineState.SynthesizingSpeech &&
+                _engineState.value !is VoiceEngineState.Speaking
+            ) {
+                startContinuousListeningCycle()
+            }
+        }
     }
 
     /**
      * Triggered when the user interrupts Aura while Aura is speaking.
      */
     fun handleBargeIn() {
-        ttsEngine.stop()
-        _engineState.value = VoiceEngineState.BargeInInterrupted("User interrupted speaking")
-        onBargeInTriggered?.invoke()
-
-        // Restart listening after interruption
         voiceScope.launch {
-            _engineState.value = VoiceEngineState.Listening(0f)
-            startSpeechRecognitionForContinuous()
+            ttsEngine.stop()
+            _engineState.value = VoiceEngineState.BargeInInterrupted("User interrupted speaking")
+            onBargeInTriggered?.invoke()
+
+            if (isContinuousRunning && _mode.value == VoiceMode.CONTINUOUS_CONVERSATION) {
+                scheduleContinuousRestart(200L)
+            }
         }
     }
 
@@ -144,28 +217,47 @@ class VoiceInteractionManager(
      * Called by Agent Core to speak response aloud when in Voice mode.
      */
     fun speakResponse(text: String, onFinished: () -> Unit = {}) {
+        // Prevent overlapping microphone capture and TTS playback
+        restartJob?.cancel()
+        restartJob = null
+        sttEngine.stopListening()
+        audioCaptureManager.stopCapture()
+
         _engineState.value = VoiceEngineState.SynthesizingSpeech
         ttsEngine.speak(
             request = SpeechSynthesisRequest(text = text),
             onStart = {
-                _engineState.value = VoiceEngineState.Speaking(0.1f)
+                voiceScope.launch {
+                    _engineState.value = VoiceEngineState.Speaking(0.1f)
+                }
             },
             onDone = {
-                if (_mode.value == VoiceMode.CONTINUOUS_CONVERSATION) {
-                    _engineState.value = VoiceEngineState.Listening(0f)
-                } else {
-                    _engineState.value = VoiceEngineState.Idle
+                voiceScope.launch {
+                    if (isContinuousRunning && _mode.value == VoiceMode.CONTINUOUS_CONVERSATION) {
+                        _engineState.value = VoiceEngineState.Listening(0f)
+                        startContinuousListeningCycle()
+                    } else {
+                        _engineState.value = VoiceEngineState.Idle
+                    }
+                    onFinished()
                 }
-                onFinished()
             },
             onError = { error ->
-                _engineState.value = VoiceEngineState.Error("TTS failed: $error")
-                onFinished()
+                voiceScope.launch {
+                    _engineState.value = VoiceEngineState.Error("TTS failed: $error")
+                    if (isContinuousRunning && _mode.value == VoiceMode.CONTINUOUS_CONVERSATION) {
+                        scheduleContinuousRestart(500L)
+                    }
+                    onFinished()
+                }
             }
         )
     }
 
     fun stopVoiceInteraction() {
+        isContinuousRunning = false
+        restartJob?.cancel()
+        restartJob = null
         sttEngine.stopListening()
         ttsEngine.stop()
         audioCaptureManager.stopCapture()
