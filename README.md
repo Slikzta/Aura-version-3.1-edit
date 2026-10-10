@@ -121,6 +121,31 @@ Aura includes comprehensive defensive guards across the pipeline:
 
 ---
 
+---
+
+## Model Provider Configuration & Persistence (Aura 3.1)
+
+Aura supports dynamic runtime configuration and persistent storage for all AI model providers:
+
+- **Pluggable Providers**:
+  - **Google Gemini (REST/SSE)**: `gemini-1.5-flash`, `gemini-1.5-pro`
+  - **OpenAI**: `gpt-4o-mini`, `gpt-4o`
+  - **Anthropic Claude**: `claude-3-5-sonnet-20241022`
+  - **Ollama (Local / LAN)**: `llama3.2:latest` (e.g. `http://10.0.2.2:11434/v1`)
+  - **Custom OpenAI-Compatible Endpoint**: Any compatible local or remote inference endpoint
+  - **Aura Architecture Diagnostic (Offline)**: Zero-credential offline test provider
+
+### Persistence Behavior & App Restarts
+
+- **Persistent Storage**: All provider configurations (endpoints, model identifiers, API keys) are persisted using Android private persistent storage (`ModelProviderStorage` backed by `SharedPreferences`).
+- **Separate Active Provider Tracking**: The selected active provider is persisted independently from provider configurations.
+- **Startup Loading**: Saved configurations and the active provider selection are loaded during application startup before initializing `ModelProviderRegistry`.
+- **No Unconditional Fallback**: The offline diagnostic provider is only selected on fresh install when no credentials/configs exist, or when explicitly chosen by the user. Saved selections (e.g., Google Gemini) survive app swipe-close and simulated restarts.
+- **Save Feedback**: The "Save Provider Config" button validates parameters, commits to persistent storage, and displays immediate success or error feedback.
+- **Security**: API keys are stored in private app storage and masked by `SecretSanitizer`, never logged or exposed.
+
+---
+
 ## Testing & Verification
 
 Run the complete test suite:
@@ -130,6 +155,7 @@ gradle :app:testDebugUnitTest
 ```
 
 Key test suites:
+- `AuraModelProviderPersistenceTest`: Validates that model provider configurations (including Google Gemini) and the active provider survive simulated app restarts, input validation, and secure credential handling.
 - `AuraLiveModelToolLoopTest`: Validates the end-to-end Voice → Live Model → Tool → Result → Speech loop and error recovery.
 - `NetworkModelProviderTest`: Validates OpenAI SSE streaming, tool-call chunk accumulation, auth state detection, and HTTP error handling.
 - `AuraContinuousChatTest`: Validates Continuous Chat state machine, barge-in, and lifecycle handling.

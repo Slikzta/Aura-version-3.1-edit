@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.aura.core.agent.AuraAgent
 import com.example.aura.core.logging.AgentAuditLogger
 import com.example.aura.core.provider.ModelProviderRegistry
+import com.example.aura.core.provider.ModelProviderStorage
 import com.example.aura.core.security.ApprovalManager
 import com.example.aura.core.session.SessionManager
 import com.example.aura.core.tools.AndroidDeviceActionsTool
@@ -38,8 +39,18 @@ class AuraContainer(
         AuraRepository(database)
     }
 
+    val providerStorage: ModelProviderStorage by lazy {
+        ModelProviderStorage(context.applicationContext)
+    }
+
     val providerRegistry: ModelProviderRegistry by lazy {
-        ModelProviderRegistry()
+        val savedConfigs = providerStorage.loadAllConfigs(ModelProviderRegistry.defaultConfigs())
+        val savedActiveProviderId = providerStorage.loadActiveProviderId()
+        ModelProviderRegistry(
+            storage = providerStorage,
+            initialConfigs = savedConfigs,
+            initialActiveProviderId = savedActiveProviderId
+        )
     }
 
     val approvalManager: ApprovalManager by lazy {

@@ -172,9 +172,20 @@ class AuraMainViewModel(
         container.agent.updateModelProvider(container.providerRegistry.getActiveProvider())
     }
 
-    fun updateProviderConfig(config: ProviderConfig) {
-        container.providerRegistry.updateConfig(config)
-        container.agent.updateModelProvider(container.providerRegistry.getActiveProvider())
+    fun updateProviderConfig(config: ProviderConfig): Result<Unit> {
+        return try {
+            if (config.type != com.example.aura.core.provider.ModelProviderType.DIAGNOSTIC_OFFLINE && config.endpointUrl.isBlank()) {
+                return Result.failure(IllegalArgumentException("Endpoint URL cannot be empty"))
+            }
+            if (config.defaultModel.isBlank()) {
+                return Result.failure(IllegalArgumentException("Model identifier cannot be empty"))
+            }
+            container.providerRegistry.updateConfig(config)
+            container.agent.updateModelProvider(container.providerRegistry.getActiveProvider())
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     fun addMemory(key: String, content: String, category: String) {

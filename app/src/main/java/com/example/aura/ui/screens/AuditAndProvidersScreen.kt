@@ -302,11 +302,13 @@ fun ProviderConfigCard(
     provider: ProviderConfig,
     isActive: Boolean,
     onSelect: () -> Unit,
-    onSave: (ProviderConfig) -> Unit
+    onSave: (ProviderConfig) -> Result<Unit>
 ) {
     var endpoint by remember(provider.endpointUrl) { androidx.compose.runtime.mutableStateOf(provider.endpointUrl) }
     var apiKey by remember(provider.apiKey) { androidx.compose.runtime.mutableStateOf(provider.apiKey) }
     var modelName by remember(provider.defaultModel) { androidx.compose.runtime.mutableStateOf(provider.defaultModel) }
+    var saveStatusMessage by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var isSaveError by remember { androidx.compose.runtime.mutableStateOf(false) }
 
     Card(
         modifier = Modifier
@@ -401,17 +403,62 @@ fun ProviderConfigCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            if (saveStatusMessage != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            color = if (isSaveError) AuraCriticalRed.copy(alpha = 0.12f) else AuraSafeGreen.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isSaveError) AuraCriticalRed.copy(alpha = 0.5f) else AuraSafeGreen.copy(alpha = 0.5f),
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .testTag("provider_save_feedback_${provider.id}")
+                ) {
+                    Icon(
+                        imageVector = if (isSaveError) Icons.Default.Cancel else Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = if (isSaveError) AuraCriticalRed else AuraSafeGreen,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = saveStatusMessage ?: "",
+                        color = if (isSaveError) AuraCriticalRed else AuraSafeGreen,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Button(
                     onClick = {
-                        onSave(
+                        val result = onSave(
                             provider.copy(
-                                endpointUrl = endpoint,
-                                apiKey = apiKey,
-                                defaultModel = modelName
+                                endpointUrl = endpoint.trim(),
+                                apiKey = apiKey.trim(),
+                                defaultModel = modelName.trim()
                             )
                         )
+                        result.fold(
+                            onSuccess = {
+                                saveStatusMessage = "Configuration saved successfully"
+                                isSaveError = false
+                            },
+                            onFailure = { error ->
+                                saveStatusMessage = error.message ?: "Failed to save configuration"
+                                isSaveError = true
+                            }
+                        )
                     },
+                    modifier = Modifier.testTag("save_provider_button_${provider.id}"),
                     colors = ButtonDefaults.buttonColors(containerColor = AuraVioletSecondary)
                 ) {
                     Text("Save Provider Config", fontSize = 11.sp)

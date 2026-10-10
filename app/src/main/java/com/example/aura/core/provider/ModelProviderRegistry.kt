@@ -11,17 +11,21 @@ import java.util.concurrent.ConcurrentHashMap
  * Central registry managing model providers in Aura.
  * Allows switching providers at runtime without modifying the agent core.
  */
-class ModelProviderRegistry {
+class ModelProviderRegistry(
+    private val storage: ModelProviderStorage? = null,
+    initialConfigs: List<ProviderConfig>? = null,
+    initialActiveProviderId: String? = null
+) {
 
-    private val _configs = MutableStateFlow<List<ProviderConfig>>(defaultConfigs())
+    private val _configs = MutableStateFlow<List<ProviderConfig>>(
+        initialConfigs ?: storage?.loadAllConfigs(defaultConfigs()) ?: defaultConfigs()
+    )
     val configs: StateFlow<List<ProviderConfig>> = _configs.asStateFlow()
 
     private val _activeProviderId = MutableStateFlow(
-        if (BuildConfig.OPENAI_API_KEY.isNotBlank() && BuildConfig.OPENAI_API_KEY != "UNCONFIGURED") {
-            "openai_provider"
-        } else {
-            "diagnostic_offline"
-        }
+        initialActiveProviderId
+            ?: storage?.loadActiveProviderId()
+            ?: determineDefaultActiveProviderId(_configs.value)
     )
     val activeProviderId: StateFlow<String> = _activeProviderId.asStateFlow()
 
@@ -53,6 +57,7 @@ class ModelProviderRegistry {
     fun setActiveProvider(providerId: String) {
         if (providerInstances.containsKey(providerId) || _configs.value.any { it.id == providerId }) {
             _activeProviderId.value = providerId
+            storage?.saveActiveProviderId(providerId)
         }
     }
 
@@ -66,6 +71,7 @@ class ModelProviderRegistry {
         } else if (updated.type != ModelProviderType.DIAGNOSTIC_OFFLINE) {
             providerInstances[updated.id] = NetworkModelProvider(updated)
         }
+        storage?.saveConfig(updated)
     }
 
     suspend fun checkProviderHealth(providerId: String): ProviderHealth {
@@ -88,7 +94,18 @@ class ModelProviderRegistry {
         return instance?.authState ?: ProviderAuthState.Uninitialized
     }
 
-    private companion object {
+    companion object {
+        fun determineDefaultActiveProviderId(configs: List<ProviderConfig>): String {
+            val openAiConfig = configs.find { it.id == "openai_provider" }
+            if (openAiConfig != null && openAiConfig.apiKey.isNotBlank() && openAiConfig.apiKey != "UNCONFIGURED") {
+                return "openai_provider"
+            }
+            if (BuildConfig.OPENAI_API_KEY.isNotBlank() && BuildConfig.OPENAI_API_KEY != "UNCONFIGURED") {
+                return "openai_provider"
+            }
+            return "diagnostic_offline"
+        }
+
         fun defaultConfigs(): List<ProviderConfig> = listOf(
             ProviderConfig(
                 id = "diagnostic_offline",
