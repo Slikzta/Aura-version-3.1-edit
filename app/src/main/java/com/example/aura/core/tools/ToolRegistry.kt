@@ -27,7 +27,13 @@ class ToolRegistry {
         }
     }
 
-    fun getTool(id: String): AuraTool? = toolsMap[id]
+    fun getTool(idOrName: String): AuraTool? {
+        return toolsMap[idOrName]
+            ?: toolsMap.values.find {
+                it.id.equals(idOrName, ignoreCase = true) ||
+                it.name.equals(idOrName, ignoreCase = true)
+            }
+    }
 
     fun setToolEnabled(toolId: String, enabled: Boolean) {
         _enabledToolIds.update { set ->

@@ -33,6 +33,19 @@ class ConfigurableOfflineProvider(
     )
 
     override suspend fun generateResponse(request: CompletionRequest): CompletionResponse {
+        val lastMessage = request.messages.lastOrNull()
+        if (lastMessage?.role == MessageRole.TOOL) {
+            return CompletionResponse(
+                message = ChatMessage(
+                    role = MessageRole.ASSISTANT,
+                    content = "Aura Architecture verified tool execution outcome: ${lastMessage.content}"
+                ),
+                finishReason = "stop",
+                usage = TokenUsage(promptTokens = 45, completionTokens = 35, totalTokens = 80),
+                providerId = id
+            )
+        }
+
         val userPrompt = request.messages.lastOrNull { it.role == MessageRole.USER }?.content ?: ""
 
         val isToolTest = userPrompt.contains("tool", ignoreCase = true) ||
@@ -75,6 +88,14 @@ class ConfigurableOfflineProvider(
     }
 
     override fun streamResponse(request: CompletionRequest): Flow<StreamChunk> = flow {
+        val lastMessage = request.messages.lastOrNull()
+        if (lastMessage?.role == MessageRole.TOOL) {
+            emit(StreamChunk.ReasoningChunk("Analyzing tool execution results via offline architecture provider..."))
+            emit(StreamChunk.TextChunk("Aura Architecture verified tool outcome: ${lastMessage.content}"))
+            emit(StreamChunk.DoneChunk("stop"))
+            return@flow
+        }
+
         emit(StreamChunk.ReasoningChunk("Analyzing prompt via Aura decoupled provider layer..."))
 
         val userPrompt = request.messages.lastOrNull { it.role == MessageRole.USER }?.content ?: ""

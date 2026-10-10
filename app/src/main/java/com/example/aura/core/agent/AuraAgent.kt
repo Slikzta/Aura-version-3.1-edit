@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -58,8 +59,13 @@ class AuraAgent(
     private val coroutineDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Main.immediate
 ) {
 
-    var modelProvider: ModelProvider = providerRegistry.getActiveProvider()
-        private set
+    private var customModelProvider: ModelProvider? = null
+
+    var modelProvider: ModelProvider
+        get() = customModelProvider ?: providerRegistry.getActiveProvider()
+        private set(value) {
+            customModelProvider = value
+        }
 
     constructor(
         appContext: Context,
@@ -89,11 +95,11 @@ class AuraAgent(
         voiceManager = voiceManager,
         coroutineDispatcher = coroutineDispatcher
     ) {
-        this.modelProvider = modelProvider
+        this.customModelProvider = modelProvider
     }
 
     fun updateModelProvider(newProvider: ModelProvider) {
-        this.modelProvider = newProvider
+        this.customModelProvider = newProvider
     }
 
     private val agentScope = CoroutineScope(coroutineDispatcher + SupervisorJob())
@@ -173,84 +179,125 @@ class AuraAgent(
                     appendLine(memoryContext)
                 }
 
-                val pastMessages = repository.getMessagesForSessionSync(session.id).map {
-                    ChatMessage(
-                        role = MessageRole.valueOf(it.role),
-                        content = it.content
-                    )
-                }
-
                 val availableTools = toolRegistry.toToolDefinitions()
-                val request = CompletionRequest(
-                    messages = pastMessages,
-                    systemPrompt = systemPrompt,
-                    availableTools = availableTools
-                )
 
-                val provider = modelProvider
-                auditLogger.logModelRequest(
-                    sessionId = session.id,
-                    providerName = provider.name,
-                    promptPreview = userText,
-                    messageCount = pastMessages.size
-                )
+                var currentIteration = 0
+                val maxIterations = 5
+                val currentRequestedToolCalls = mutableListOf<com.example.aura.core.provider.ToolCallRequest>()
+                var latestAssistantText = ""
 
-                session.setState(SessionState.STREAMING)
-                session.clearStreamingText()
+                do {
+                    currentIteration++
+                    currentRequestedToolCalls.clear()
 
-                val accumulatedContent = StringBuilder()
-                val requestedToolCalls = mutableListOf<com.example.aura.core.provider.ToolCallRequest>()
-
-                // Use the production StreamingEngine
-                streamingEngine.stream(request, provider).collect { chunk ->
-                    when (chunk) {
-                        is StreamChunk.ReasoningChunk -> {
-                            _events.tryEmit(AgentEvent.Reasoning(chunk.thought))
-                            auditLogger.logReasoning(session.id, provider.name, chunk.thought)
+                    val pastMessages = repository.getMessagesForSessionSync(session.id).map { msgEntity ->
+                        var toolCallId: String? = null
+                        var toolName: String? = null
+                        if (msgEntity.role == MessageRole.TOOL.name) {
+                            try {
+                                msgEntity.toolResultJson?.let {
+                                    val json = JSONObject(it)
+                                    toolCallId = json.optString("tool_call_id").takeIf { id -> id.isNotBlank() }
+                                    toolName = json.optString("tool_name").takeIf { name -> name.isNotBlank() }
+                                }
+                            } catch (_: Exception) {
+                                null
+                            }
                         }
-                        is StreamChunk.TextChunk -> {
-                            accumulatedContent.append(chunk.text)
-                            session.appendStreamingToken(chunk.text)
-                            _events.tryEmit(AgentEvent.TextStreamChunk(chunk.text))
-                        }
-                        is StreamChunk.ToolCallChunk -> {
-                            requestedToolCalls.add(chunk.toolCall)
-                        }
-                        is StreamChunk.DoneChunk -> {
-                            auditLogger.logModelResponse(session.id, provider.name, chunk.finishReason, accumulatedContent.length)
-                        }
-                        is StreamChunk.ErrorChunk -> {
-                            throw chunk.throwable
-                        }
-                        else -> Unit
-                    }
-                }
 
-                val assistantText = accumulatedContent.toString()
+                        val toolCalls = if (msgEntity.role == MessageRole.ASSISTANT.name) {
+                            parseToolCallsJson(msgEntity.toolCallsJson)
+                        } else emptyList()
 
-                if (assistantText.isNotBlank()) {
-                    repository.saveMessage(
-                        MessageEntity(
-                            sessionId = session.id,
-                            role = MessageRole.ASSISTANT.name,
-                            content = assistantText
+                        ChatMessage(
+                            role = MessageRole.valueOf(msgEntity.role),
+                            content = msgEntity.content,
+                            name = toolName,
+                            toolCalls = toolCalls,
+                            toolCallId = toolCallId
                         )
+                    }
+
+                    val request = CompletionRequest(
+                        messages = pastMessages,
+                        systemPrompt = systemPrompt,
+                        availableTools = availableTools
                     )
 
+                    val provider = modelProvider
+                    auditLogger.logModelRequest(
+                        sessionId = session.id,
+                        providerName = provider.name,
+                        promptPreview = if (currentIteration == 1) userText else "Tool result follow-up",
+                        messageCount = pastMessages.size
+                    )
+
+                    session.setState(SessionState.STREAMING)
+                    session.clearStreamingText()
+
+                    val accumulatedContent = StringBuilder()
+
+                    // Use the production StreamingEngine
+                    streamingEngine.stream(request, provider).collect { chunk ->
+                        when (chunk) {
+                            is StreamChunk.ReasoningChunk -> {
+                                _events.tryEmit(AgentEvent.Reasoning(chunk.thought))
+                                auditLogger.logReasoning(session.id, provider.name, chunk.thought)
+                            }
+                            is StreamChunk.TextChunk -> {
+                                accumulatedContent.append(chunk.text)
+                                session.appendStreamingToken(chunk.text)
+                                _events.tryEmit(AgentEvent.TextStreamChunk(chunk.text))
+                            }
+                            is StreamChunk.ToolCallChunk -> {
+                                currentRequestedToolCalls.add(chunk.toolCall)
+                            }
+                            is StreamChunk.DoneChunk -> {
+                                auditLogger.logModelResponse(session.id, provider.name, chunk.finishReason, accumulatedContent.length)
+                            }
+                            is StreamChunk.ErrorChunk -> {
+                                throw chunk.throwable
+                            }
+                            else -> Unit
+                        }
+                    }
+
+                    latestAssistantText = accumulatedContent.toString()
+
+                    val toolCallsJson = if (currentRequestedToolCalls.isNotEmpty()) {
+                        serializeToolCalls(currentRequestedToolCalls)
+                    } else null
+
+                    if (latestAssistantText.isNotBlank() || currentRequestedToolCalls.isNotEmpty()) {
+                        repository.saveMessage(
+                            MessageEntity(
+                                sessionId = session.id,
+                                role = MessageRole.ASSISTANT.name,
+                                content = latestAssistantText,
+                                toolCallsJson = toolCallsJson
+                            )
+                        )
+                    }
+
+                    // Handle Tool Calls through the complete Orchestration Cycle
+                    if (currentRequestedToolCalls.isNotEmpty()) {
+                        for (toolCall in currentRequestedToolCalls) {
+                            handleToolCall(session, toolCall)
+                        }
+                        // Next loop iteration will return tool results to the model
+                    }
+
+                } while (currentRequestedToolCalls.isNotEmpty() && currentIteration < maxIterations)
+
+                // Loop complete: model has produced its final response
+                if (latestAssistantText.isNotBlank()) {
                     // Route response back through Aura's voice output system when in voice mode or continuous conversation
                     if (session.mode.value == com.example.aura.core.session.SessionMode.VOICE_STREAM ||
                         voiceManager?.mode?.value == com.example.aura.core.voice.VoiceMode.CONTINUOUS_CONVERSATION) {
-                        voiceManager?.speakResponse(assistantText)
+                        voiceManager?.speakResponse(latestAssistantText)
                     }
                 } else if (voiceManager?.mode?.value == com.example.aura.core.voice.VoiceMode.CONTINUOUS_CONVERSATION) {
                     voiceManager?.resumeContinuousListening()
-                }
-
-                // Handle Tool Calls through the complete Orchestration Cycle
-                if (requestedToolCalls.isNotEmpty()) {
-                    for (toolCall in requestedToolCalls) {
-                        handleToolCall(session, toolCall)
-                    }
                 }
 
                 orchestrator.transitionTo(
@@ -271,18 +318,36 @@ class AuraAgent(
             } catch (e: Exception) {
                 _agentState.value = AgentState.ERROR
                 session.setState(SessionState.ERROR)
-                orchestrator.transitionTo(OrchestrationPhase.ERROR, "Agent error: ${e.message}")
+                val errorMessage = when (e) {
+                    is com.example.aura.core.provider.ProviderError.AuthenticationError -> "Model authentication error: ${e.message}"
+                    is com.example.aura.core.provider.ProviderError.NetworkTimeoutError -> "Network timeout while communicating with model: ${e.message}"
+                    is com.example.aura.core.provider.ProviderError.RateLimitError -> "Rate limit reached for model provider: ${e.message}"
+                    is com.example.aura.core.provider.ProviderError.InvalidRequestError -> "Invalid model request: ${e.message}"
+                    is com.example.aura.core.provider.ProviderError.ProviderUnavailableError -> "Model provider unavailable: ${e.message}"
+                    else -> "Agent error: ${e.message}"
+                }
+                orchestrator.transitionTo(OrchestrationPhase.ERROR, errorMessage)
                 auditLogger.log(
                     com.example.aura.core.logging.AuditLogEntry(
                         sessionId = session.id,
                         type = com.example.aura.core.logging.AuditEventType.PROVIDER_ERROR,
                         source = "AuraAgent",
-                        message = "Error in agent loop: ${e.message}",
+                        message = errorMessage,
                         securityLevel = com.example.aura.core.security.SecurityLevel.SAFE
                     )
                 )
-                _events.tryEmit(AgentEvent.ErrorOccurred("Agent error: ${e.message}", e))
-                if (voiceManager?.mode?.value == com.example.aura.core.voice.VoiceMode.CONTINUOUS_CONVERSATION) {
+                repository.saveMessage(
+                    MessageEntity(
+                        sessionId = session.id,
+                        role = MessageRole.ASSISTANT.name,
+                        content = errorMessage
+                    )
+                )
+                _events.tryEmit(AgentEvent.ErrorOccurred(errorMessage, e))
+                if (session.mode.value == com.example.aura.core.session.SessionMode.VOICE_STREAM ||
+                    voiceManager?.mode?.value == com.example.aura.core.voice.VoiceMode.CONTINUOUS_CONVERSATION) {
+                    voiceManager?.speakResponse(errorMessage)
+                } else if (voiceManager?.mode?.value == com.example.aura.core.voice.VoiceMode.CONTINUOUS_CONVERSATION) {
                     voiceManager?.resumeContinuousListening()
                 }
             } finally {
@@ -298,34 +363,102 @@ class AuraAgent(
         session: ConversationSession,
         toolCall: com.example.aura.core.provider.ToolCallRequest
     ) {
+        val toolName = toolCall.name.trim()
+        if (toolName.isBlank()) {
+            val errorMsg = "Model requested tool execution without a tool name."
+            auditLogger.logToolExecuted(session.id, "unknown", false, errorMsg, com.example.aura.core.security.SecurityLevel.SAFE)
+            repository.saveMessage(
+                MessageEntity(
+                    sessionId = session.id,
+                    role = MessageRole.TOOL.name,
+                    content = errorMsg,
+                    toolResultJson = JSONObject().apply {
+                        put("tool_call_id", toolCall.id)
+                        put("tool_name", "unknown")
+                        put("error", errorMsg)
+                    }.toString()
+                )
+            )
+            return
+        }
+
         // Phase 3: SELECT TOOL
         orchestrator.transitionTo(
             OrchestrationPhase.SELECT_TOOL,
-            "Model selected tool: '${toolCall.name}'",
-            toolId = toolCall.name
+            "Model selected tool: '$toolName'",
+            toolId = toolName
         )
-        auditLogger.logToolSelection(session.id, toolCall.name, toolCall.name)
+        auditLogger.logToolSelection(session.id, toolName, toolName)
 
-        val tool = toolRegistry.getTool(toolCall.name)
+        val tool = toolRegistry.getTool(toolName)
         if (tool == null) {
-            auditLogger.logToolExecuted(session.id, toolCall.name, false, "Unknown tool", com.example.aura.core.security.SecurityLevel.SAFE)
+            val errorMsg = "Tool '$toolName' is not recognized or available."
+            auditLogger.logToolExecuted(session.id, toolName, false, errorMsg, com.example.aura.core.security.SecurityLevel.SAFE)
+            repository.saveMessage(
+                MessageEntity(
+                    sessionId = session.id,
+                    role = MessageRole.TOOL.name,
+                    content = errorMsg,
+                    toolResultJson = JSONObject().apply {
+                        put("tool_call_id", toolCall.id)
+                        put("tool_name", toolName)
+                        put("error", errorMsg)
+                    }.toString()
+                )
+            )
             return
         }
 
         // Parse arguments & validate input against schema
-        val args = try {
-            val json = JSONObject(toolCall.argumentsJson)
-            val map = mutableMapOf<String, Any?>()
-            json.keys().forEach { key -> map[key] = json.opt(key) }
-            map
-        } catch (_: Exception) {
+        var jsonParseError: String? = null
+        val args = if (toolCall.argumentsJson.isNotBlank() && toolCall.argumentsJson.trim() != "{}") {
+            try {
+                val json = JSONObject(toolCall.argumentsJson)
+                val map = mutableMapOf<String, Any?>()
+                json.keys().forEach { key -> map[key] = json.opt(key) }
+                map
+            } catch (e: Exception) {
+                jsonParseError = e.message ?: "Invalid JSON syntax"
+                emptyMap()
+            }
+        } else {
             emptyMap()
+        }
+
+        if (jsonParseError != null) {
+            val malformedMsg = "Malformed arguments JSON for tool '${tool.name}': $jsonParseError"
+            auditLogger.logToolExecuted(session.id, tool.name, false, malformedMsg, tool.securityLevel)
+            repository.saveMessage(
+                MessageEntity(
+                    sessionId = session.id,
+                    role = MessageRole.TOOL.name,
+                    content = malformedMsg,
+                    toolResultJson = JSONObject().apply {
+                        put("tool_call_id", toolCall.id)
+                        put("tool_name", tool.name)
+                        put("error", malformedMsg)
+                    }.toString()
+                )
+            )
+            return
         }
 
         val validation = tool.inputSchema.validateInput(args)
         if (validation.isFailure) {
-            val errMsg = validation.exceptionOrNull()?.message ?: "Invalid arguments"
+            val errMsg = "Invalid arguments for tool '${tool.name}': ${validation.exceptionOrNull()?.message ?: "Malformed parameters"}"
             auditLogger.logToolExecuted(session.id, tool.name, false, errMsg, tool.securityLevel)
+            repository.saveMessage(
+                MessageEntity(
+                    sessionId = session.id,
+                    role = MessageRole.TOOL.name,
+                    content = errMsg,
+                    toolResultJson = JSONObject().apply {
+                        put("tool_call_id", toolCall.id)
+                        put("tool_name", tool.name)
+                        put("error", errMsg)
+                    }.toString()
+                )
+            )
             return
         }
 
@@ -350,7 +483,12 @@ class AuraAgent(
                 MessageEntity(
                     sessionId = session.id,
                     role = MessageRole.TOOL.name,
-                    content = permDeniedMsg
+                    content = permDeniedMsg,
+                    toolResultJson = JSONObject().apply {
+                        put("tool_call_id", toolCall.id)
+                        put("tool_name", tool.name)
+                        put("error", permDeniedMsg)
+                    }.toString()
                 )
             )
             return
@@ -388,7 +526,12 @@ class AuraAgent(
                     MessageEntity(
                         sessionId = session.id,
                         role = MessageRole.TOOL.name,
-                        content = denialMsg
+                        content = denialMsg,
+                        toolResultJson = JSONObject().apply {
+                            put("tool_call_id", toolCall.id)
+                            put("tool_name", tool.name)
+                            put("error", denialMsg)
+                        }.toString()
                     )
                 )
                 return
@@ -409,12 +552,15 @@ class AuraAgent(
             sessionId = session.id
         )
 
-        val result = tool.execute(context, args)
-        val (success, output) = when (result) {
-            is ToolExecutionResult.Success -> Pair(true, result.output)
-            is ToolExecutionResult.Failure -> Pair(false, "Failed: ${result.errorMessage}")
-            is ToolExecutionResult.DeniedByPolicy -> Pair(false, "Denied: ${result.reason}")
-            is ToolExecutionResult.Cancelled -> Pair(false, "Cancelled: ${result.reason}")
+        val (success, output) = try {
+            when (val result = tool.execute(context, args)) {
+                is ToolExecutionResult.Success -> Pair(true, result.output)
+                is ToolExecutionResult.Failure -> Pair(false, "Failed: ${result.errorMessage}")
+                is ToolExecutionResult.DeniedByPolicy -> Pair(false, "Denied: ${result.reason}")
+                is ToolExecutionResult.Cancelled -> Pair(false, "Cancelled: ${result.reason}")
+            }
+        } catch (e: Exception) {
+            Pair(false, "Tool execution exception: ${e.message}")
         }
 
         // Phase 7: OBSERVE RESULT
@@ -439,9 +585,47 @@ class AuraAgent(
                 sessionId = session.id,
                 role = MessageRole.TOOL.name,
                 content = output,
-                toolResultJson = output
+                toolResultJson = JSONObject().apply {
+                    put("tool_call_id", toolCall.id)
+                    put("tool_name", tool.name)
+                    put("output", output)
+                    put("success", success)
+                }.toString()
             )
         )
+    }
+
+    private fun parseToolCallsJson(json: String?): List<com.example.aura.core.provider.ToolCallRequest> {
+        if (json.isNullOrBlank()) return emptyList()
+        return try {
+            val arr = JSONArray(json)
+            val list = mutableListOf<com.example.aura.core.provider.ToolCallRequest>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    com.example.aura.core.provider.ToolCallRequest(
+                        id = obj.getString("id"),
+                        name = obj.getString("name"),
+                        argumentsJson = obj.optString("argumentsJson", "{}")
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun serializeToolCalls(calls: List<com.example.aura.core.provider.ToolCallRequest>): String {
+        val arr = JSONArray()
+        calls.forEach { tc ->
+            arr.put(JSONObject().apply {
+                put("id", tc.id)
+                put("name", tc.name)
+                put("argumentsJson", tc.argumentsJson)
+            })
+        }
+        return arr.toString()
     }
 
     /**

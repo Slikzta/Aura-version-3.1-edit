@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
  * Implements strict error boundaries and honest state reporting:
  * - If credentials or endpoints are unconfigured, raises [ProviderError.AuthenticationError].
  * - When valid endpoints are configured, streams real tokens over SSE without artificial delay.
- * - Never returns fabricated mock tokens.
+ * - Supports complete tool calling protocol and parameter mapping.
  */
 class NetworkModelProvider(
     private var config: ProviderConfig,
@@ -38,10 +38,15 @@ class NetworkModelProvider(
 
     override val authState: ProviderAuthState
         get() {
+            val isLocalEndpoint = config.type == ModelProviderType.OLLAMA_LOCAL ||
+                config.endpointUrl.contains("localhost") ||
+                config.endpointUrl.contains("127.0.0.1") ||
+                config.endpointUrl.contains("10.0.2.2")
             return when {
                 config.endpointUrl.isBlank() -> ProviderAuthState.InvalidConfiguration("Missing endpoint URL")
-                config.type == ModelProviderType.OLLAMA_LOCAL -> ProviderAuthState.Configured
-                config.apiKey.isBlank() -> ProviderAuthState.MissingCredentials("API key is not configured for ${config.displayName}")
+                isLocalEndpoint -> ProviderAuthState.Configured
+                config.apiKey.isBlank() || config.apiKey == "UNCONFIGURED" ->
+                    ProviderAuthState.MissingCredentials("API key is not configured for ${config.displayName}")
                 else -> ProviderAuthState.Configured
             }
         }
@@ -68,7 +73,7 @@ class NetworkModelProvider(
             .url(getCompletionUrl())
             .addHeader("Content-Type", "application/json")
             .apply {
-                if (config.apiKey.isNotBlank()) {
+                if (config.apiKey.isNotBlank() && config.apiKey != "UNCONFIGURED") {
                     addHeader("Authorization", "Bearer ${config.apiKey}")
                 }
             }
@@ -90,8 +95,27 @@ class NetworkModelProvider(
             val content = messageObj?.optString("content", "") ?: ""
             val finishReason = firstChoice?.optString("finish_reason", "stop")
 
+            val toolCalls = mutableListOf<ToolCallRequest>()
+            val toolCallsJsonArray = messageObj?.optJSONArray("tool_calls")
+            if (toolCallsJsonArray != null) {
+                for (i in 0 until toolCallsJsonArray.length()) {
+                    val tcObj = toolCallsJsonArray.optJSONObject(i) ?: continue
+                    val callId = tcObj.optString("id", "call_${System.currentTimeMillis()}_$i")
+                    val fnObj = tcObj.optJSONObject("function")
+                    val fnName = fnObj?.optString("name", "") ?: ""
+                    val fnArgs = fnObj?.optString("arguments", "{}") ?: "{}"
+                    if (fnName.isNotBlank()) {
+                        toolCalls.add(ToolCallRequest(id = callId, name = fnName, argumentsJson = fnArgs))
+                    }
+                }
+            }
+
             CompletionResponse(
-                message = ChatMessage(role = MessageRole.ASSISTANT, content = content),
+                message = ChatMessage(
+                    role = MessageRole.ASSISTANT,
+                    content = content,
+                    toolCalls = toolCalls
+                ),
                 finishReason = finishReason,
                 providerId = id
             )
@@ -114,7 +138,7 @@ class NetworkModelProvider(
             .addHeader("Content-Type", "application/json")
             .addHeader("Accept", "text/event-stream")
             .apply {
-                if (config.apiKey.isNotBlank()) {
+                if (config.apiKey.isNotBlank() && config.apiKey != "UNCONFIGURED") {
                     addHeader("Authorization", "Bearer ${config.apiKey}")
                 }
             }
@@ -136,8 +160,12 @@ class NetworkModelProvider(
             ?: throw ProviderError.InvalidRequestError("Null response stream")
 
         val reader = BufferedReader(InputStreamReader(inputStream))
+        val streamingToolCalls = mutableMapOf<Int, StreamingToolCallAccumulator>()
+
         try {
             var line: String?
+            var finishReasonEmitted: String? = null
+
             while (reader.readLine().also { line = it } != null) {
                 val currentLine = line?.trim() ?: continue
                 if (currentLine.isEmpty() || currentLine.startsWith(":")) continue // SSE keep-alive
@@ -145,23 +173,75 @@ class NetworkModelProvider(
                 if (currentLine.startsWith("data:")) {
                     val data = currentLine.removePrefix("data:").trim()
                     if (data == "[DONE]") {
-                        emit(StreamChunk.DoneChunk("stop"))
                         break
                     }
 
                     try {
                         val json = JSONObject(data)
                         val choices = json.optJSONArray("choices")
-                        val delta = choices?.optJSONObject(0)?.optJSONObject("delta")
+                        val firstChoice = choices?.optJSONObject(0)
+                        val delta = firstChoice?.optJSONObject("delta")
+                        val finishReason = firstChoice?.optString("finish_reason")
+                        if (!finishReason.isNullOrEmpty() && finishReason != "null") {
+                            finishReasonEmitted = finishReason
+                        }
+
+                        // Stream text token
                         val token = delta?.optString("content")
-                        if (!token.isNullOrEmpty()) {
+                        if (!token.isNullOrEmpty() && token != "null") {
                             emit(StreamChunk.TextChunk(token))
+                        }
+
+                        // Stream tool calls
+                        val deltaToolCalls = delta?.optJSONArray("tool_calls")
+                        if (deltaToolCalls != null) {
+                            for (i in 0 until deltaToolCalls.length()) {
+                                val tcDelta = deltaToolCalls.optJSONObject(i) ?: continue
+                                val index = tcDelta.optInt("index", i)
+                                val accumulator = streamingToolCalls.getOrPut(index) { StreamingToolCallAccumulator() }
+
+                                val callId = tcDelta.optString("id")
+                                if (!callId.isNullOrEmpty() && callId != "null") {
+                                    accumulator.id = callId
+                                }
+
+                                val fn = tcDelta.optJSONObject("function")
+                                if (fn != null) {
+                                    val name = fn.optString("name")
+                                    if (!name.isNullOrEmpty() && name != "null") {
+                                        accumulator.name = name
+                                    }
+
+                                    val argsChunk = fn.optString("arguments")
+                                    if (!argsChunk.isNullOrEmpty() && argsChunk != "null") {
+                                        accumulator.arguments.append(argsChunk)
+                                    }
+                                }
+                            }
                         }
                     } catch (_: Exception) {
                         // Skip unparseable heartbeats or non-JSON lines
                     }
                 }
             }
+
+            // Emit accumulated tool calls in order
+            streamingToolCalls.keys.sorted().forEach { index ->
+                val tc = streamingToolCalls[index]
+                if (tc != null && tc.name.isNotBlank()) {
+                    emit(
+                        StreamChunk.ToolCallChunk(
+                            ToolCallRequest(
+                                id = tc.id.ifBlank { "call_${System.currentTimeMillis()}_$index" },
+                                name = tc.name,
+                                argumentsJson = tc.arguments.toString().ifBlank { "{}" }
+                            )
+                        )
+                    )
+                }
+            }
+
+            emit(StreamChunk.DoneChunk(finishReasonEmitted ?: "stop"))
         } finally {
             reader.close()
             response.close()
@@ -184,7 +264,7 @@ class NetworkModelProvider(
 
     private fun buildJsonPayload(request: CompletionRequest, stream: Boolean): JSONObject {
         val root = JSONObject()
-        root.put("model", config.defaultModel.ifBlank { "default" })
+        root.put("model", config.defaultModel.ifBlank { "gpt-4o-mini" })
         root.put("stream", stream)
         root.put("temperature", request.temperature)
         root.put("max_tokens", request.maxTokens)
@@ -197,12 +277,69 @@ class NetworkModelProvider(
             })
         }
         request.messages.forEach { msg ->
-            messagesArray.put(JSONObject().apply {
-                put("role", msg.role.name.lowercase())
-                put("content", msg.content)
-            })
+            val msgObj = JSONObject()
+            msgObj.put("role", msg.role.name.lowercase())
+            when (msg.role) {
+                MessageRole.TOOL -> {
+                    msgObj.put("content", msg.content)
+                    msgObj.put("tool_call_id", if (!msg.toolCallId.isNullOrBlank()) msg.toolCallId else "call_default")
+                    if (!msg.name.isNullOrBlank()) {
+                        msgObj.put("name", msg.name)
+                    }
+                }
+                MessageRole.ASSISTANT -> {
+                    if (msg.toolCalls.isNotEmpty()) {
+                        if (msg.content.isNotBlank()) {
+                            msgObj.put("content", msg.content)
+                        } else {
+                            msgObj.put("content", JSONObject.NULL)
+                        }
+                        val toolCallsArr = JSONArray()
+                        msg.toolCalls.forEach { tc ->
+                            toolCallsArr.put(JSONObject().apply {
+                                put("id", tc.id)
+                                put("type", "function")
+                                put("function", JSONObject().apply {
+                                    put("name", tc.name)
+                                    put("arguments", tc.argumentsJson)
+                                })
+                            })
+                        }
+                        msgObj.put("tool_calls", toolCallsArr)
+                    } else {
+                        msgObj.put("content", msg.content)
+                    }
+                }
+                else -> {
+                    msgObj.put("content", msg.content)
+                }
+            }
+            messagesArray.put(msgObj)
         }
         root.put("messages", messagesArray)
+
+        if (request.availableTools.isNotEmpty()) {
+            val toolsArray = JSONArray()
+            request.availableTools.forEach { toolDef ->
+                val toolObj = JSONObject()
+                toolObj.put("type", "function")
+                val fnObj = JSONObject()
+                fnObj.put("name", toolDef.name)
+                fnObj.put("description", toolDef.description)
+                try {
+                    fnObj.put("parameters", JSONObject(toolDef.parametersJsonSchema))
+                } catch (_: Exception) {
+                    fnObj.put("parameters", JSONObject().apply {
+                        put("type", "object")
+                        put("properties", JSONObject())
+                    })
+                }
+                toolObj.put("function", fnObj)
+                toolsArray.put(toolObj)
+            }
+            root.put("tools", toolsArray)
+        }
+
         return root
     }
 
@@ -214,4 +351,10 @@ class NetworkModelProvider(
             else -> ProviderError.ProviderUnavailableError("Server returned error ($statusCode): $body")
         }
     }
+
+    private class StreamingToolCallAccumulator(
+        var id: String = "",
+        var name: String = "",
+        val arguments: StringBuilder = StringBuilder()
+    )
 }

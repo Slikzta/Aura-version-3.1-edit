@@ -1,5 +1,6 @@
 package com.example.aura.core.provider
 
+import com.example.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,7 +16,13 @@ class ModelProviderRegistry {
     private val _configs = MutableStateFlow<List<ProviderConfig>>(defaultConfigs())
     val configs: StateFlow<List<ProviderConfig>> = _configs.asStateFlow()
 
-    private val _activeProviderId = MutableStateFlow("diagnostic_offline")
+    private val _activeProviderId = MutableStateFlow(
+        if (BuildConfig.OPENAI_API_KEY.isNotBlank() && BuildConfig.OPENAI_API_KEY != "UNCONFIGURED") {
+            "openai_provider"
+        } else {
+            "diagnostic_offline"
+        }
+    )
     val activeProviderId: StateFlow<String> = _activeProviderId.asStateFlow()
 
     private val providerInstances = ConcurrentHashMap<String, ModelProvider>()
@@ -102,8 +109,13 @@ class ModelProviderRegistry {
                 id = "openai_provider",
                 type = ModelProviderType.OPENAI,
                 displayName = "OpenAI",
-                endpointUrl = "https://api.openai.com/v1",
-                defaultModel = "gpt-4o-mini",
+                endpointUrl = BuildConfig.OPENAI_BASE_URL.ifBlank { "https://api.openai.com/v1" },
+                apiKey = if (BuildConfig.OPENAI_API_KEY.isNotBlank() && BuildConfig.OPENAI_API_KEY != "UNCONFIGURED") {
+                    BuildConfig.OPENAI_API_KEY
+                } else {
+                    ""
+                },
+                defaultModel = BuildConfig.OPENAI_MODEL.ifBlank { "gpt-4o-mini" },
                 isEnabled = true
             ),
             ProviderConfig(
