@@ -346,4 +346,68 @@ class AuraContinuousChatTest {
         assertTrue(voiceManager.engineState.value is VoiceEngineState.Listening)
         assertTrue(fakeStt.isListening.value)
     }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun testContinuousChatHangingTtsInitTimesOutAndRecoversToListening() = runTest {
+        // Create a VoiceInteractionManager with a TTS engine that simulates hanging initialization
+        val hangingTts = object : TextToSpeechEngine {
+            private val _isSpeaking = MutableStateFlow(false)
+            override val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
+            var errorCallback: ((String) -> Unit)? = null
+
+            override fun speak(
+                request: SpeechSynthesisRequest,
+                onStart: () -> Unit,
+                onDone: () -> Unit,
+                onError: (String) -> Unit
+            ) {
+                // Simulates pending request queued while waiting for onInit which never arrives
+                errorCallback = onError
+            }
+
+            override fun stop() { _isSpeaking.value = false }
+            override fun shutdown() { _isSpeaking.value = false }
+        }
+
+        val testVoiceManager = VoiceInteractionManager(
+            context = context,
+            sttEngine = fakeStt,
+            ttsEngine = hangingTts,
+            vad = EnergyThresholdVAD()
+        )
+
+        testVoiceManager.setCallbacks(
+            onUserInput = { _ ->
+                testVoiceManager.speakResponse("Agent response")
+            },
+            onBargeIn = {}
+        )
+
+        testVoiceManager.startContinuousConversation()
+        assertTrue(testVoiceManager.engineState.value is VoiceEngineState.Listening)
+
+        // User speaks
+        fakeStt.emitFinalText("Hello Aura")
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+
+        // State moves to SynthesizingSpeech, waiting on TTS engine
+        assertEquals(VoiceEngineState.SynthesizingSpeech, testVoiceManager.engineState.value)
+
+        // TTS timeout fires, invoking onError
+        hangingTts.errorCallback?.invoke("TTS initialization timed out after 4000ms")
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+
+        // Engine transitions to Error state
+        assertTrue(testVoiceManager.engineState.value is VoiceEngineState.Error)
+
+        // Advance looper past continuous restart delay (500ms)
+        org.robolectric.shadows.ShadowLooper.idleMainLooper(600, java.util.concurrent.TimeUnit.MILLISECONDS)
+        testScheduler.advanceTimeBy(600L)
+        testScheduler.runCurrent()
+
+        // Continuous Chat successfully resumes listening rather than remaining hung
+        assertTrue(testVoiceManager.engineState.value is VoiceEngineState.Listening)
+        assertTrue(fakeStt.isListening.value)
+    }
 }
