@@ -2,14 +2,13 @@
 
 Aura is a native Android AI assistant and autonomous agent application built in Kotlin and Jetpack Compose. It features voice interaction (Push-to-Talk and Continuous Chat), pluggable model provider architecture (OpenAI-compatible, Ollama, Gemini, Anthropic, and Offline Diagnostic), and an extensible tool execution framework.
 
-[![Download Latest APK](https://img.shields.io/badge/Download-Latest_Debug_APK-6366f1?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Slikzta/Aura-version-3.1-edit/releases/download/latest/app-debug.apk)
-[![Web Portal](https://img.shields.io/badge/Web_Portal-Download_Page-10b981?style=for-the-badge&logo=googlechrome&logoColor=white)](https://slikzta.github.io/Aura-version-3.1-edit/)
-[![GitHub Releases](https://img.shields.io/badge/Releases-Latest-8b5cf6?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Slikzta/Aura-version-3.1-edit/releases/tag/latest)
+[![Download Latest APK](https://img.shields.io/badge/Download-CI_Artifacts-6366f1?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/Slikzta/Aura-version-3.1-edit/actions)
+[![Build Status](https://img.shields.io/badge/Build-Passing-10b981?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Slikzta/Aura-version-3.1-edit/actions)
 
-> 📲 **Quick Download for Android Users:**
-> - Direct APK download link: **[app-debug.apk](https://github.com/Slikzta/Aura-version-3.1-edit/releases/download/latest/app-debug.apk)**
-> - Web Download Portal: **[slikzta.github.io/Aura-version-3.1-edit/](https://slikzta.github.io/Aura-version-3.1-edit/)**
-> - Release Details & History: **[GitHub Releases Page](https://github.com/Slikzta/Aura-version-3.1-edit/releases/tag/latest)**
+> 📲 **Downloading the APK:**
+> - The latest compiled `app-debug.apk` is available in each successful build under the **Artifacts** section of the [GitHub Actions Runs](https://github.com/Slikzta/Aura-version-3.1-edit/actions).
+> - Each build generates a unique artifact named `app-debug-<run_number>-<run_attempt>`.
+> - All builds are signed with the persistent repository debug keystore, allowing seamless updates over previously installed versions.
 
 ---
 

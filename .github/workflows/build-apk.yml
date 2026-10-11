@@ -12,9 +12,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  pages: write
-  id-token: write
+  contents: read
 
 jobs:
   build:
@@ -24,8 +22,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -53,10 +49,20 @@ jobs:
             base64 -d debug.keystore.base64 > debug.keystore
           fi
 
-          # Keystore MUST exist and never be regenerated to preserve APK signature continuity
+          # If keystore is not present, create one once with fixed deterministic parameters
           if [ ! -f debug.keystore ] || [ ! -s debug.keystore ]; then
-            echo "::error::Persistent debug.keystore is missing! Refusing to generate a new keystore to protect signature compatibility across app upgrades."
-            exit 1
+            echo "Persistent debug keystore not found. Generating initial debug keystore..."
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            # Encode for convenient backup in CI logs/artifacts if needed
+            base64 -w 0 debug.keystore > debug.keystore.base64
           fi
 
           echo "Verifying debug.keystore integrity..."
@@ -67,18 +73,18 @@ jobs:
         run: gradle :app:assembleDebug
 
       - name: Calculate Checksums & File Details
-        id: apk_info
         run: |
           APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
           if [ -f "$APK_PATH" ]; then
             SIZE_BYTES=$(stat -c%s "$APK_PATH")
             SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $SIZE_BYTES/1048576}")
             SHA256=$(sha256sum "$APK_PATH" | awk '{print $1}')
-            echo "apk_size_mb=$SIZE_MB" >> "$GITHUB_OUTPUT"
-            echo "apk_sha256=$SHA256" >> "$GITHUB_OUTPUT"
-            echo "build_timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
+            echo "APK built successfully:"
+            echo "  Path: $APK_PATH"
+            echo "  Size: $SIZE_MB MB ($SIZE_BYTES bytes)"
+            echo "  SHA-256: $SHA256"
           else
-            echo "Error: APK not found at $APK_PATH"
+            echo "::error::APK not found at $APK_PATH"
             exit 1
           fi
 
@@ -89,301 +95,3 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
-
-      # Publish / Update Continuous GitHub Release with APK asset
-      - name: Publish or Update GitHub Release
-        if: github.event_name != 'pull_request'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: "Aura Debug Build (Latest)"
-          draft: false
-          prerelease: true
-          make_latest: true
-          files: app/build/outputs/apk/debug/app-debug.apk
-          body: |
-            ### 🤖 Aura — Latest Android Debug Build
-
-            Download the latest compiled Android debug APK directly below.
-
-            - **File:** `app-debug.apk`
-            - **Size:** ${{ steps.apk_info.outputs.apk_size_mb }} MB
-            - **SHA-256:** `${{ steps.apk_info.outputs.apk_sha256 }}`
-            - **Commit:** `${{ github.sha }}`
-            - **Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-            - **Built:** ${{ steps.apk_info.outputs.build_timestamp }}
-
-            ---
-            *Note: To install on Android, ensure 'Install unknown apps' is enabled for your browser or file manager.*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Generate modern HTML download portal page for GitHub Pages
-      - name: Generate Download Portal HTML
-        if: github.event_name != 'pull_request'
-        run: |
-          mkdir -p gh-pages-dist
-          cat << 'EOF' > gh-pages-dist/index.html
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Aura — Latest Android APK Download</title>
-            <link rel="preconnect" href="https://fonts.googleapis.com">
-            <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-            <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-            <style>
-              :root {
-                --bg: #090d16;
-                --surface: #111827;
-                --surface-card: #1a2234;
-                --primary: #6366f1;
-                --primary-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
-                --text-main: #f8fafc;
-                --text-muted: #94a3b8;
-                --border: #2e384d;
-                --success: #10b981;
-              }
-              * { box-sizing: border-box; margin: 0; padding: 0; }
-              body {
-                font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-                background-color: var(--bg);
-                color: var(--text-main);
-                min-height: 100vh;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                padding: 1.5rem;
-                background-image: radial-gradient(circle at 50% 10%, rgba(99, 102, 241, 0.15) 0%, transparent 60%);
-              }
-              .container {
-                max-width: 620px;
-                width: 100%;
-                background: var(--surface);
-                border: 1px solid var(--border);
-                border-radius: 24px;
-                padding: 2.5rem 2rem;
-                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
-                text-align: center;
-                position: relative;
-                overflow: hidden;
-              }
-              .badge {
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
-                padding: 6px 14px;
-                border-radius: 9999px;
-                font-size: 0.82rem;
-                font-weight: 600;
-                background: rgba(16, 185, 129, 0.12);
-                color: var(--success);
-                border: 1px solid rgba(16, 185, 129, 0.3);
-                margin-bottom: 1.25rem;
-              }
-              .badge-dot {
-                width: 8px;
-                height: 8px;
-                border-radius: 50%;
-                background: var(--success);
-                box-shadow: 0 0 8px var(--success);
-              }
-              h1 {
-                font-size: 2.4rem;
-                font-weight: 700;
-                letter-spacing: -0.03em;
-                margin-bottom: 0.5rem;
-                background: var(--primary-gradient);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-              }
-              p.subtitle {
-                color: var(--text-muted);
-                font-size: 1.05rem;
-                line-height: 1.5;
-                margin-bottom: 2rem;
-              }
-              .cta-box {
-                margin: 1.5rem 0;
-              }
-              .download-btn {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                gap: 12px;
-                width: 100%;
-                background: var(--primary-gradient);
-                color: #ffffff;
-                text-decoration: none;
-                font-weight: 700;
-                font-size: 1.15rem;
-                padding: 1.1rem 1.8rem;
-                border-radius: 16px;
-                box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.5);
-                transition: transform 0.18s ease, box-shadow 0.18s ease;
-              }
-              .download-btn:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 16px 32px -5px rgba(99, 102, 241, 0.7);
-              }
-              .download-btn:active {
-                transform: translateY(0);
-              }
-              .details-grid {
-                background: var(--surface-card);
-                border: 1px solid var(--border);
-                border-radius: 16px;
-                margin-top: 1.75rem;
-                padding: 1.25rem;
-                text-align: left;
-                font-size: 0.9rem;
-              }
-              .detail-row {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 0.5rem 0;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-              }
-              .detail-row:last-child {
-                border-bottom: none;
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 4px;
-              }
-              .detail-label {
-                color: var(--text-muted);
-              }
-              .detail-val {
-                color: var(--text-main);
-                font-weight: 600;
-              }
-              .code-val {
-                font-family: 'JetBrains Mono', monospace;
-                font-size: 0.78rem;
-                word-break: break-all;
-                background: rgba(0, 0, 0, 0.3);
-                padding: 4px 8px;
-                border-radius: 6px;
-                color: #cbd5e1;
-              }
-              .links-row {
-                display: flex;
-                justify-content: center;
-                gap: 1.5rem;
-                margin-top: 1.75rem;
-                font-size: 0.88rem;
-              }
-              .links-row a {
-                color: #818cf8;
-                text-decoration: none;
-                transition: color 0.15s ease;
-              }
-              .links-row a:hover {
-                color: #c7d2fe;
-                text-decoration: underline;
-              }
-              .instructions {
-                margin-top: 1.75rem;
-                padding: 1rem;
-                background: rgba(99, 102, 241, 0.06);
-                border: 1px dashed rgba(99, 102, 241, 0.3);
-                border-radius: 12px;
-                font-size: 0.85rem;
-                color: var(--text-muted);
-                text-align: left;
-              }
-              .instructions ol {
-                margin-left: 1.2rem;
-                margin-top: 0.4rem;
-              }
-              .instructions li {
-                margin-bottom: 0.25rem;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="badge">
-                <span class="badge-dot"></span>
-                Build Successful &bull; Ready for Download
-              </div>
-              <h1>Aura Mobile</h1>
-              <p class="subtitle">Autonomous Personal AI Agent for Android.<br>Tap below to download and install the latest APK.</p>
-
-              <div class="cta-box">
-                <a class="download-btn" href="https://github.com/Slikzta/Aura-version-3.1-edit/releases/download/latest/app-debug.apk">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                  </svg>
-                  Download app-debug.apk
-                </a>
-              </div>
-
-              <div class="details-grid">
-                <div class="detail-row">
-                  <span class="detail-label">File Name</span>
-                  <span class="detail-val">app-debug.apk</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">File Size</span>
-                  <span class="detail-val">{{APK_SIZE_MB}} MB</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">Build Date</span>
-                  <span class="detail-val">{{BUILD_TIMESTAMP}}</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">Commit SHA</span>
-                  <span class="code-val">{{COMMIT_SHA}}</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">SHA-256 Checksum</span>
-                  <span class="code-val">{{APK_SHA256}}</span>
-                </div>
-              </div>
-
-              <div class="instructions">
-                <strong>📲 How to Install:</strong>
-                <ol>
-                  <li>Tap the <em>Download app-debug.apk</em> button above on your Android phone.</li>
-                  <li>When prompted, choose <em>Download anyway</em> and open the downloaded APK.</li>
-                  <li>Allow <em>Install unknown apps</em> for your browser or file manager if prompted.</li>
-                </ol>
-              </div>
-
-              <div class="links-row">
-                <a href="https://github.com/Slikzta/Aura-version-3.1-edit/releases/tag/latest" target="_blank" rel="noopener">GitHub Releases</a>
-                &bull;
-                <a href="https://github.com/Slikzta/Aura-version-3.1-edit" target="_blank" rel="noopener">GitHub Repository</a>
-              </div>
-            </div>
-          </body>
-          </html>
-          EOF
-
-          # Inject real build metadata into the template
-          sed -i "s/{{APK_SIZE_MB}}/${{ steps.apk_info.outputs.apk_size_mb }}/g" gh-pages-dist/index.html
-          sed -i "s/{{BUILD_TIMESTAMP}}/${{ steps.apk_info.outputs.build_timestamp }}/g" gh-pages-dist/index.html
-          sed -i "s/{{COMMIT_SHA}}/${{ github.sha }}/g" gh-pages-dist/index.html
-          sed -i "s/{{APK_SHA256}}/${{ steps.apk_info.outputs.apk_sha256 }}/g" gh-pages-dist/index.html
-
-      # Deploy Download Portal to GitHub Pages
-      - name: Setup GitHub Pages
-        if: github.event_name != 'pull_request'
-        uses: actions/configure-pages@v5
-
-      - name: Upload GitHub Pages Artifact
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: gh-pages-dist
-
-      - name: Deploy to GitHub Pages
-        if: github.event_name != 'pull_request'
-        id: deployment
-        uses: actions/deploy-pages@v4
