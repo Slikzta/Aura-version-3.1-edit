@@ -723,10 +723,10 @@ class AuraAgent(
             AgentStep(
                 stepIndex = index++,
                 description = "Persist execution findings to sandboxed filesystem",
-                toolId = "sandboxed_filesystem",
+                toolId = "sandboxed_file",
                 arguments = mapOf(
-                    "action" to "write_file",
-                    "path" to "autonomous_report_${System.currentTimeMillis()}.txt",
+                    "action" to "write",
+                    "file_name" to "autonomous_report_${System.currentTimeMillis()}.txt",
                     "content" to "Autonomous Project: $goalTitle\nObjective: $description\nFindings: {{PREVIOUS_OUTPUT}}"
                 ),
                 status = StepStatus.PENDING
@@ -738,11 +738,10 @@ class AuraAgent(
             AgentStep(
                 stepIndex = index++,
                 description = "Propose completion notification to user",
-                toolId = "notification_proposal",
+                toolId = "propose_notification",
                 arguments = mapOf(
                     "title" to "Aura: $goalTitle",
-                    "message" to "Autonomous task execution completed successfully.",
-                    "priority" to "NORMAL"
+                    "message" to "Autonomous task execution completed successfully."
                 ),
                 status = StepStatus.PENDING
             )
@@ -791,13 +790,13 @@ class AuraAgent(
             lower.contains("web") || lower.contains("http") || lower.contains("url") ->
                 Pair("web_access", mapOf("url" to "https://example.com"))
             lower.contains("file") || lower.contains("save") || lower.contains("sandbox") || lower.contains("memory") || lower.contains("vault") ->
-                Pair("sandboxed_filesystem", mapOf("action" to "write_file", "path" to "step_artifact.txt", "content" to "{{PREVIOUS_OUTPUT}}"))
+                Pair("sandboxed_file", mapOf("action" to "write", "file_name" to "step_artifact.txt", "content" to "{{PREVIOUS_OUTPUT}}"))
             lower.contains("notify") || lower.contains("notification") || lower.contains("alert") || lower.contains("outcome") ->
-                Pair("notification_proposal", mapOf("title" to "Aura Plan Step", "message" to desc, "priority" to "NORMAL"))
+                Pair("propose_notification", mapOf("title" to "Aura Plan Step", "message" to desc))
             lower.contains("calendar") || lower.contains("event") ->
-                Pair("calendar_tool", mapOf("action" to "get_events"))
+                Pair("calendar", mapOf("action" to "get_events"))
             lower.contains("message") || lower.contains("sms") ->
-                Pair("messaging_tool", mapOf("action" to "draft", "recipient" to "user", "message" to "Aura autonomous update"))
+                Pair("messaging", mapOf("recipient_phone" to "+15550199", "message_body" to "Aura autonomous update"))
             else ->
                 Pair("system_diagnostics", mapOf("action" to "get_metrics"))
         }
@@ -809,12 +808,12 @@ class AuraAgent(
             return activePlanJob!!
         }
 
-        val job = agentScope.launch {
-            _activePlan.value = currentPlan.copy(isRunning = true, failureReason = null)
-            _events.tryEmit(AgentEvent.PlanUpdated(_activePlan.value!!))
-            _agentState.value = AgentState.EXECUTING_TOOL
-            _events.tryEmit(AgentEvent.StateChanged(AgentState.EXECUTING_TOOL))
+        _activePlan.value = currentPlan.copy(isRunning = true, failureReason = null)
+        _events.tryEmit(AgentEvent.PlanUpdated(_activePlan.value!!))
+        _agentState.value = AgentState.EXECUTING_TOOL
+        _events.tryEmit(AgentEvent.StateChanged(AgentState.EXECUTING_TOOL))
 
+        val job = agentScope.launch {
             var previousStepOutput: String? = null
             val outputsByStep = mutableMapOf<Int, String>()
 

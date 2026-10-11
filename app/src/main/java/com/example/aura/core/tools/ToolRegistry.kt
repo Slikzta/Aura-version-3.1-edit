@@ -35,6 +35,7 @@ class ToolRegistry {
                 it.name.equals(idOrName, ignoreCase = true) ||
                 (normalized == "sandboxed_filesystem" && it.id == "sandboxed_file") ||
                 (normalized == "device_network_check" && it.id == "network_check") ||
+                (normalized == "network_check" && it.id == "network_check") ||
                 (normalized == "messaging_tool" && it.id == "messaging") ||
                 (normalized == "calendar_tool" && it.id == "calendar") ||
                 (normalized == "notification_proposal" && it.id == "propose_notification") ||

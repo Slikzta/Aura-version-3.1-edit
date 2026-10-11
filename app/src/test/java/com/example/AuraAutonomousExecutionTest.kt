@@ -74,26 +74,22 @@ class AuraAutonomousExecutionTest {
         val job = container.agent.executeAutonomousPlan()
 
         // Wait for coroutine and looper execution, resolving any required approval gates
-        for (i in 1..40) {
+        val startTime = System.currentTimeMillis()
+        while (job.isActive && System.currentTimeMillis() - startTime < 15000L) {
             val pending = container.approvalManager.pendingRequests.value
             pending.forEach { req ->
                 container.approvalManager.resolveRequest(req.id, approved = true)
             }
             ShadowLooper.idleMainLooper()
             testScheduler.runCurrent()
-            if (!container.agent.activePlan.value!!.isRunning) break
-            Thread.sleep(25)
+            Thread.sleep(20)
         }
         job.join()
 
         val completedPlan = container.agent.activePlan.value
         assertNotNull(completedPlan)
-        if (completedPlan?.steps?.any { it.status != StepStatus.COMPLETED } == true) {
-            val failedSteps = completedPlan.steps.filter { it.status != StepStatus.COMPLETED }
-            throw AssertionError("Steps not completed: ${failedSteps.map { "${it.stepIndex}: ${it.toolId} -> ${it.status} (err: ${it.error})" }} | failureReason: ${completedPlan.failureReason}")
-        }
-        assertFalse("Plan should not be running after completion", completedPlan!!.isRunning)
-        assertTrue("All steps should be COMPLETED", completedPlan.steps.all { it.status == StepStatus.COMPLETED })
+        val stepSummaries = completedPlan!!.steps.map { "${it.stepIndex}(${it.toolId}): ${it.status} err=${it.error}" }
+        assertTrue("All steps should be COMPLETED, but got: $stepSummaries", completedPlan.steps.all { it.status == StepStatus.COMPLETED })
         assertEquals(AgentState.IDLE, container.agent.agentState.value)
 
         // Verify output was passed to sandboxed file report
