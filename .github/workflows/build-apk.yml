@@ -62,7 +62,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'UNCONFIGURED' }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}
-        run: gradle :app:assembleDebug
+        run: gradle clean :app:assembleDebug
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
