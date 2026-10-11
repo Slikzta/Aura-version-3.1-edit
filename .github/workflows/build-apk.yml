@@ -47,6 +47,9 @@ jobs:
 
           if [ -n "$SECRET_DEBUG_KEYSTORE_BASE64" ]; then
             echo "$SECRET_DEBUG_KEYSTORE_BASE64" | base64 -d > debug.keystore
+          elif [ ! -s debug.keystore ]; then
+            echo "SECRET_DEBUG_KEYSTORE_BASE64 is not set; generating standard debug.keystore..."
+            keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
           if [ ! -s debug.keystore ]; then
