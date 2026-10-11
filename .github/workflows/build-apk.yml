@@ -67,7 +67,15 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'UNCONFIGURED' }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}
-        run: gradle clean :app:assembleDebug
+        run: |
+          echo "=== Before build ==="
+          find app/build -name "app-debug.apk" -exec ls -lah {} \;
+          echo "=== Running gradle clean build ==="
+          gradle clean :app:assembleDebug --info
+          echo "=== After build ==="
+          ls -lah app/build/outputs/apk/debug/app-debug.apk
+          file app/build/outputs/apk/debug/app-debug.apk
+          sha256sum app/build/outputs/apk/debug/app-debug.apk
 
       - name: Verify APK exists
         run: ls -lah app/build/outputs/apk/debug/app-debug.apk
