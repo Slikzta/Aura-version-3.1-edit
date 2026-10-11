@@ -37,26 +37,31 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Prepare build environment
+        env:
+          SECRET_DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           # Ensure environment placeholders exist for Secrets Gradle Plugin
           touch .env.example
           touch .env
-          # Restore debug keystore if base64 encoded file exists
-          if [ -f debug.keystore.base64 ]; then
+
+          # Restore persistent debug keystore from GitHub Secret or repository backup
+          if [ -n "$SECRET_DEBUG_KEYSTORE_BASE64" ]; then
+            echo "Restoring persistent debug keystore from GitHub Secret DEBUG_KEYSTORE_BASE64..."
+            echo "$SECRET_DEBUG_KEYSTORE_BASE64" | base64 -d > debug.keystore
+          elif [ -f debug.keystore.base64 ]; then
+            echo "Restoring persistent debug keystore from repository debug.keystore.base64..."
             base64 -d debug.keystore.base64 > debug.keystore
           fi
-          # If keystore still doesn't exist, generate a new one using default JDK keytool
-          if [ ! -f debug.keystore ]; then
-            keytool -genkeypair -v \
-              -keystore debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
+
+          # Keystore MUST exist and never be regenerated to preserve APK signature continuity
+          if [ ! -f debug.keystore ] || [ ! -s debug.keystore ]; then
+            echo "::error::Persistent debug.keystore is missing! Refusing to generate a new keystore to protect signature compatibility across app upgrades."
+            exit 1
           fi
+
+          echo "Verifying debug.keystore integrity..."
+          keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey > /dev/null
+          echo "debug.keystore successfully verified with persistent signing identity."
 
       - name: Build Debug APK
         run: gradle :app:assembleDebug
