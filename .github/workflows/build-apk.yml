@@ -69,7 +69,7 @@ jobs:
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}
         run: |
           echo "=== Before build ==="
-          find app/build -name "app-debug.apk" -exec ls -lah {} \;
+          find app/build -name "app-debug.apk" -exec ls -lah {} \; 2>/dev/null || echo "No previous build found"
           echo "=== Running gradle clean build ==="
           gradle clean :app:assembleDebug --info
           echo "=== After build ==="
