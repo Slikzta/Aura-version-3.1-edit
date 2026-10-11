@@ -33,60 +33,19 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Prepare build environment
-        env:
-          SECRET_DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
-          # Ensure environment placeholders exist for Secrets Gradle Plugin
-          touch .env.example
-          touch .env
-
-          # Restore persistent debug keystore from GitHub Secret or repository backup
+          touch .env.example .env
           if [ -n "$SECRET_DEBUG_KEYSTORE_BASE64" ]; then
-            echo "Restoring persistent debug keystore from GitHub Secret DEBUG_KEYSTORE_BASE64..."
             echo "$SECRET_DEBUG_KEYSTORE_BASE64" | base64 -d > debug.keystore
-          elif [ -f debug.keystore.base64 ]; then
-            echo "Restoring persistent debug keystore from repository debug.keystore.base64..."
-            base64 -d debug.keystore.base64 > debug.keystore
+          elif [ ! -f debug.keystore ]; then
+            echo "::error::debug.keystore missing and SECRET_DEBUG_KEYSTORE_BASE64 not set"
+            exit 1
           fi
-
-          # If keystore is not present, create one once with fixed deterministic parameters
-          if [ ! -f debug.keystore ] || [ ! -s debug.keystore ]; then
-            echo "Persistent debug keystore not found. Generating initial debug keystore..."
-            keytool -genkeypair -v \
-              -keystore debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-            # Encode for convenient backup in CI logs/artifacts if needed
-            base64 -w 0 debug.keystore > debug.keystore.base64
-          fi
-
-          echo "Verifying debug.keystore integrity..."
-          keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey > /dev/null
-          echo "debug.keystore successfully verified with persistent signing identity."
+        env:
+          SECRET_DEBUG_KEYSTORE_BASE64: ${{ secrets.SECRET_DEBUG_KEYSTORE_BASE64 }}
 
       - name: Build Debug APK
         run: gradle :app:assembleDebug
-
-      - name: Calculate Checksums & File Details
-        run: |
-          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
-          if [ -f "$APK_PATH" ]; then
-            SIZE_BYTES=$(stat -c%s "$APK_PATH")
-            SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $SIZE_BYTES/1048576}")
-            SHA256=$(sha256sum "$APK_PATH" | awk '{print $1}')
-            echo "APK built successfully:"
-            echo "  Path: $APK_PATH"
-            echo "  Size: $SIZE_MB MB ($SIZE_BYTES bytes)"
-            echo "  SHA-256: $SHA256"
-          else
-            echo "::error::APK not found at $APK_PATH"
-            exit 1
-          fi
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
