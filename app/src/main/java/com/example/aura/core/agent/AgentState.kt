@@ -24,8 +24,10 @@ data class AgentStep(
     val stepIndex: Int,
     val description: String,
     val toolId: String? = null,
+    val arguments: Map<String, Any?> = emptyMap(),
     val status: StepStatus = StepStatus.PENDING,
-    val resultSummary: String? = null
+    val resultSummary: String? = null,
+    val error: String? = null
 )
 
 enum class StepStatus {
@@ -42,9 +44,12 @@ enum class StepStatus {
  */
 data class AgentPlan(
     val id: String = UUID.randomUUID().toString(),
+    val projectId: String? = null,
     val goalTitle: String,
     val steps: List<AgentStep>,
-    val createdAtMillis: Long = System.currentTimeMillis()
+    val createdAtMillis: Long = System.currentTimeMillis(),
+    val isRunning: Boolean = false,
+    val failureReason: String? = null
 )
 
 /**
@@ -58,6 +63,9 @@ sealed interface AgentEvent {
     data class ToolExecutionCompleted(val toolName: String, val success: Boolean, val output: String) : AgentEvent
     data class ApprovalRequired(val requestId: String, val toolName: String) : AgentEvent
     data class PlanUpdated(val plan: AgentPlan) : AgentEvent
+    data class PlanStepStarted(val step: AgentStep) : AgentEvent
+    data class PlanStepCompleted(val step: AgentStep, val success: Boolean, val output: String) : AgentEvent
+    data class PlanCompleted(val plan: AgentPlan) : AgentEvent
     data class Interrupted(val reason: String) : AgentEvent
     data class ErrorOccurred(val message: String, val cause: Throwable? = null) : AgentEvent
 }

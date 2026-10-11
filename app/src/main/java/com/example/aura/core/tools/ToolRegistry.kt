@@ -28,10 +28,16 @@ class ToolRegistry {
     }
 
     fun getTool(idOrName: String): AuraTool? {
+        val normalized = idOrName.trim().lowercase()
         return toolsMap[idOrName]
             ?: toolsMap.values.find {
                 it.id.equals(idOrName, ignoreCase = true) ||
-                it.name.equals(idOrName, ignoreCase = true)
+                it.name.equals(idOrName, ignoreCase = true) ||
+                (normalized == "sandboxed_filesystem" && it.id == "sandboxed_file") ||
+                (normalized == "messaging_tool" && it.id == "messaging") ||
+                (normalized == "calendar_tool" && it.id == "calendar") ||
+                (normalized == "notification_proposal" && it.id == "propose_notification") ||
+                (normalized == "notification_tool" && it.id == "notifications")
             }
     }
 

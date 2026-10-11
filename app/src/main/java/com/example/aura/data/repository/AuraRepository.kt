@@ -70,15 +70,23 @@ class AuraRepository(private val db: AuraDatabase) {
     suspend fun deleteProject(projectId: String) =
         db.projectDao().deleteProjectById(projectId)
 
+    suspend fun updateProjectStatus(projectId: String, status: String) =
+        db.projectDao().updateProjectStatus(projectId, status)
+
     suspend fun saveGoal(goal: GoalEntity) =
         db.goalDao().insertGoal(goal)
 
     suspend fun saveTask(task: TaskEntity) =
         db.taskDao().insertTask(task)
 
-    suspend fun updateTaskStatus(taskId: String, status: String) {
-        // Can be queried & updated
-    }
+    suspend fun getTaskById(taskId: String) =
+        db.taskDao().getTaskById(taskId)
+
+    suspend fun updateTaskStatus(taskId: String, status: String) =
+        db.taskDao().updateTaskStatus(taskId, status)
+
+    suspend fun updateTaskOutcome(taskId: String, status: String, description: String) =
+        db.taskDao().updateTaskOutcome(taskId, status, description)
 
     suspend fun deleteTask(taskId: String) =
         db.taskDao().deleteTaskById(taskId)

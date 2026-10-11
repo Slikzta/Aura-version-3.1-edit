@@ -212,37 +212,57 @@ class AuraMainViewModel(
     }
 
     fun createProject(title: String, description: String) {
+        createProjectAndPlan(title, description, autoExecute = true)
+    }
+
+    fun createProjectAndPlan(title: String, description: String, autoExecute: Boolean = true) {
         viewModelScope.launch {
             val project = ProjectEntity(
                 title = title.trim(),
                 description = description.trim(),
-                status = "PLANNING"
+                status = "IN_PROGRESS"
             )
             container.repository.saveProject(project)
 
-            container.repository.saveTask(
-                TaskEntity(
-                    projectId = project.id,
-                    title = "Analyze project scope and prerequisites",
-                    description = "Initial breakdown by Aura autonomous core",
-                    status = "IN_PROGRESS",
-                    orderIndex = 1
-                )
+            val plan = container.agent.formulateAutonomousPlan(
+                goalTitle = title.trim(),
+                description = description.trim(),
+                projectId = project.id
             )
-            container.repository.saveTask(
-                TaskEntity(
-                    projectId = project.id,
-                    title = "Formulate tool invocation strategy",
-                    description = "Assess required permissions and skills",
-                    status = "PENDING",
-                    orderIndex = 2
+
+            plan.steps.forEach { step ->
+                container.repository.saveTask(
+                    TaskEntity(
+                        id = step.id,
+                        projectId = project.id,
+                        title = step.description,
+                        description = "Tool: ${step.toolId ?: "analysis"}",
+                        status = "PENDING",
+                        orderIndex = step.stepIndex
+                    )
                 )
-            )
+            }
+
+            if (autoExecute) {
+                container.agent.executeAutonomousPlan()
+            }
         }
     }
 
     fun createAutonomousPlan(goalTitle: String, steps: List<String>) {
         container.agent.createAutonomousPlan(goalTitle, steps)
+    }
+
+    fun executeActivePlan() {
+        container.agent.executeAutonomousPlan()
+    }
+
+    fun cancelActivePlan() {
+        container.agent.cancelAutonomousPlan()
+    }
+
+    fun retryActivePlanStep(stepIndex: Int) {
+        container.agent.retryPlanStep(stepIndex)
     }
 
     fun executeToolDirectly(toolId: String, args: Map<String, Any?>) {

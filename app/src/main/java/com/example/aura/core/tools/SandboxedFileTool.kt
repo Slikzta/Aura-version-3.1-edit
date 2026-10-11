@@ -49,8 +49,14 @@ class SandboxedFileTool : AuraTool {
                 sandbox.mkdirs()
             }
 
-            val action = arguments["action"]?.toString()?.lowercase() ?: "list"
-            val fileName = arguments["file_name"]?.toString()?.replace(Regex("[/\\\\]"), "_")
+            val rawAction = arguments["action"]?.toString()?.lowercase() ?: "list"
+            val action = when (rawAction) {
+                "write_file" -> "write"
+                "read_file" -> "read"
+                "list_files" -> "list"
+                else -> rawAction
+            }
+            val fileName = (arguments["file_name"] ?: arguments["path"])?.toString()?.replace(Regex("[/\\\\]"), "_")
 
             when (action) {
                 "list" -> {

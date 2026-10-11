@@ -80,6 +80,9 @@ interface ProjectDao {
 
     @Query("DELETE FROM projects WHERE id = :id")
     suspend fun deleteProjectById(id: String)
+
+    @Query("UPDATE projects SET status = :status, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateProjectStatus(id: String, status: String, updatedAt: Long = System.currentTimeMillis())
 }
 
 @Dao
@@ -105,11 +108,20 @@ interface TaskDao {
     @Query("SELECT * FROM tasks ORDER BY createdAt DESC")
     fun getAllTasks(): Flow<List<TaskEntity>>
 
+    @Query("SELECT * FROM tasks WHERE id = :id")
+    suspend fun getTaskById(id: String): TaskEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTask(task: TaskEntity)
 
     @Update
     suspend fun updateTask(task: TaskEntity)
+
+    @Query("UPDATE tasks SET status = :status WHERE id = :id")
+    suspend fun updateTaskStatus(id: String, status: String)
+
+    @Query("UPDATE tasks SET status = :status, description = :description WHERE id = :id")
+    suspend fun updateTaskOutcome(id: String, status: String, description: String)
 
     @Query("DELETE FROM tasks WHERE id = :id")
     suspend fun deleteTaskById(id: String)
