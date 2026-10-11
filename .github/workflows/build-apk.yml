@@ -28,6 +28,11 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
+
+      - name: Remove old artifact cache
+        run: rm -rf ~/.gradle/caches/transforms-* app/build/
 
       - name: Prepare build environment
         env:
@@ -64,10 +69,13 @@ jobs:
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}
         run: gradle clean :app:assembleDebug
 
+      - name: Verify APK exists
+        run: ls -lah app/build/outputs/apk/debug/app-debug.apk
+
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-${{ github.run_number }}-${{ github.run_attempt }}
+          name: app-debug-${{ github.run_number }}-${{ github.run_attempt }}-${{ github.sha }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
