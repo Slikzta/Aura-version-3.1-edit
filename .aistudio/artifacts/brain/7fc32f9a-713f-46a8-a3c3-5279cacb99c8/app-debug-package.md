@@ -1,43 +1,29 @@
-# Aura Debug APK Package
+# Aura 3.1 Debug APK Package
 
-The debug APK for Aura is built and ready for installation on your physical Android test device.
+The Android debug APK for Aura 3.1 has been built with the model provider configuration persistence fix.
 
-## Package Summary
-- **Filename**: `app-debug.apk`
-- **Application ID**: `com.aistudio.aura.vqpzkm`
+## Build Summary
+- **Artifact**: `app-debug.apk`
+- **Output File Path**: `app/build/outputs/apk/debug/app-debug.apk`
+- **Package Size**: `~23 MB`
 - **Build Variant**: `debug`
-- **Size**: `24,037,903 bytes (~23 MB)`
-- **Build Status**: Verified with 0 errors across all unit and integration tests
+- **Application ID**: `com.aistudio.aura.vqpzkm`
+- **Key Features Included**:
+  - Full model provider configuration persistence via `ModelProviderStorage` (`SharedPreferences`).
+  - Google Gemini (REST/SSE) endpoint, model identifier, and API key persist across app swipe-close and restarts.
+  - Active provider selection is persisted independently and restored upon launch without reverting to offline diagnostic mode.
+  - UI feedback for the "Save Provider Config" button.
+  - Secure credential handling (no API key leakage).
 
-## Ways to Download the APK
+## Download Options
 
-### 1. Direct Web Download (In-Browser)
-Open the app development URL in your browser to download directly:
-- **Download Link**: [Download app-debug.apk](https://ais-dev-vfh2mhsbm2a6efumvrlxdt-881326756045.us-east1.run.app/app-debug.apk)
+### 1. AI Studio File Explorer
+1. In the file explorer sidebar, expand `app` → `build` → `outputs` → `apk` → `debug`.
+2. Right-click `app-debug.apk`.
+3. Select **Download**.
 
-### 2. Code Editor File Explorer
-In the left sidebar of AI Studio:
-1. Navigate to: `app` → `build` → `outputs` → `apk` → `debug`
-2. Right-click on **`app-debug.apk`**
-3. Select **Download**
+### 2. AI Studio Settings Menu
+Use the top-right project settings menu to download the generated APK or export the project.
 
-### 3. Settings Menu Export
-In the top-right header of AI Studio:
-1. Click the **Project / Settings** menu (three dots or gear icon)
-2. Select **Generate / Download APK** or **Export Project as ZIP**
-
----
-
-## Installation via ADB (if connected via USB)
-```bash
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
-
-## Physical Device Verification Target
-This APK verifies the full Continuous Chat loop on physical hardware:
-1. Activate Continuous Chat (floating/mic indicator flashes).
-2. Speak a query (e.g., "Report status").
-3. AuraAgent processes and generates the response.
-4. Android TextToSpeech synthesizes speech without hanging or timing out.
-5. Response plays aloud through the speaker.
-6. System cleanly transitions back to listening for the next interaction.
+### 3. Direct Browser Download
+- [Download app-debug.apk](https://ais-dev-vfh2mhsbm2a6efumvrlxdt-881326756045.us-east1.run.app/app-debug.apk)

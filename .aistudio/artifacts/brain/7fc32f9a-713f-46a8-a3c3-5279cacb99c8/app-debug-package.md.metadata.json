@@ -1,5 +1,5 @@
 {
-  "summary":  "Debug APK package for Aura Continuous Chat verification on physical devices. Contains download instructions, file metadata, package details, and verification steps.",
-  "updatedAt":  "2026-10-10T02:43:21.771899186Z",
+  "summary":  "Aura 3.1 Debug APK package containing model provider configuration persistence for Google Gemini, OpenAI, Anthropic, Ollama, and custom endpoints.",
+  "updatedAt":  "2026-10-10T21:19:39.604844649Z",
   "userFacing":  true
 }
