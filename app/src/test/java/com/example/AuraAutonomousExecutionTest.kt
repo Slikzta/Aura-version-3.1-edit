@@ -88,6 +88,10 @@ class AuraAutonomousExecutionTest {
 
         val completedPlan = container.agent.activePlan.value
         assertNotNull(completedPlan)
+        if (completedPlan?.steps?.any { it.status != StepStatus.COMPLETED } == true) {
+            val failedSteps = completedPlan.steps.filter { it.status != StepStatus.COMPLETED }
+            throw AssertionError("Steps not completed: ${failedSteps.map { "${it.stepIndex}: ${it.toolId} -> ${it.status} (err: ${it.error})" }} | failureReason: ${completedPlan.failureReason}")
+        }
         assertFalse("Plan should not be running after completion", completedPlan!!.isRunning)
         assertTrue("All steps should be COMPLETED", completedPlan.steps.all { it.status == StepStatus.COMPLETED })
         assertEquals(AgentState.IDLE, container.agent.agentState.value)
