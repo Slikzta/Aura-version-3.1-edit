@@ -11,9 +11,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
-permissions:
-  contents: read
-
 jobs:
   build:
     name: Build & Package Debug APK
@@ -33,52 +30,36 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Prepare build environment
+        env:
+          SECRET_DEBUG_KEYSTORE_BASE64: ${{ secrets.SECRET_DEBUG_KEYSTORE_BASE64 }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'UNCONFIGURED' }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}
         run: |
-          API_KEY="${SECRET_OPENAI_API_KEY:-UNCONFIGURED}"
-          if [ -z "$API_KEY" ]; then
-            API_KEY="UNCONFIGURED"
-          fi
+          set -e
 
-          BASE_URL="${SECRET_OPENAI_BASE_URL:-https://api.openai.com/v1}"
-          if [ -z "$BASE_URL" ]; then
-            BASE_URL="https://api.openai.com/v1"
-          fi
-
-          MODEL="${SECRET_OPENAI_MODEL:-gpt-4o-mini}"
-          if [ -z "$MODEL" ]; then
-            MODEL="gpt-4o-mini"
-          fi
-
-          cat <<EOF > .env
-OPENAI_API_KEY=$API_KEY
-OPENAI_BASE_URL=$BASE_URL
-OPENAI_MODEL=$MODEL
-EOF
-
-          cat <<EOF > .env.example
-OPENAI_API_KEY=UNCONFIGURED
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o-mini
-EOF
+          touch .env.example
+          cat > .env <<EOF
+          OPENAI_API_KEY=${OPENAI_API_KEY}
+          OPENAI_BASE_URL=${OPENAI_BASE_URL}
+          OPENAI_MODEL=${OPENAI_MODEL}
+          EOF
 
           if [ -n "$SECRET_DEBUG_KEYSTORE_BASE64" ]; then
             echo "$SECRET_DEBUG_KEYSTORE_BASE64" | base64 -d > debug.keystore
-          elif [ ! -f debug.keystore ]; then
-            echo "Generating debug.keystore automatically..."
-            keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
-        env:
-          SECRET_DEBUG_KEYSTORE_BASE64: ${{ secrets.SECRET_DEBUG_KEYSTORE_BASE64 }}
-          SECRET_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          SECRET_OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
-          SECRET_OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+
+          if [ ! -s debug.keystore ]; then
+            echo "::error::Missing debug keystore. Add SECRET_DEBUG_KEYSTORE_BASE64 in GitHub repo secrets."
+            exit 1
+          fi
 
       - name: Build Debug APK
-        run: gradle :app:assembleDebug
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'UNCONFIGURED' }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
           OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}
+        run: gradle :app:assembleDebug
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
