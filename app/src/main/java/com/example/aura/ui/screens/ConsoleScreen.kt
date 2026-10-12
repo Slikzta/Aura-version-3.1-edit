@@ -131,7 +131,7 @@ fun ConsoleScreen(
         ) {
             Column {
                 Text(
-                    text = "AURA COMMAND CONSOLE",
+                    text = "AURA COMMAND CONSOLE • v1.0.3",
                     color = AuraCyanPrimary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,

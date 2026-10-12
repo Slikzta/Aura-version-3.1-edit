@@ -104,7 +104,7 @@ fun AuraApp(
                                 letterSpacing = 1.2.sp
                             )
                             Text(
-                                text = "Autonomous AI Agent Core",
+                                text = "Autonomous AI Agent Core • v1.0.3",
                                 color = AuraCyanPrimary,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Medium

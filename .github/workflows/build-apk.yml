@@ -71,7 +71,7 @@ jobs:
           echo "=== Before build ==="
           find app/build -name "app-debug.apk" -exec ls -lah {} \; 2>/dev/null || echo "No previous build found"
           echo "=== Running gradle clean build ==="
-          gradle clean :app:assembleDebug --info
+          gradle clean :app:assembleDebug --rerun-tasks --no-build-cache --no-daemon
           echo "=== After build ==="
           ls -lah app/build/outputs/apk/debug/app-debug.apk
           file app/build/outputs/apk/debug/app-debug.apk
