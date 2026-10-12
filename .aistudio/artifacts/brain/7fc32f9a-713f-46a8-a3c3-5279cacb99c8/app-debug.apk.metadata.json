@@ -1,5 +1,6 @@
 {
-  "summary": "Compiled Android Debug APK binary for Aura Version 3.1 (~24 MB).",
-  "updatedAt": "2026-10-11T18:39:20.000000000Z",
-  "userFacing": true
+  "summary": "Aura Android Debug APK (Version 1.0.3, Build 4) - latest compiled binary with all Gemini and provider improvements.",
+  "updatedAt": "2026-10-12T19:41:36.383490+00:00",
+  "userFacing": true,
+  "requestFeedback": false
 }
