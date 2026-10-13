@@ -35,6 +35,10 @@ class AuraContainer(
         AuraDatabase.getInstance(context)
     }
 
+    val preferencesRepository: com.example.aura.data.repository.AuraPreferencesRepository by lazy {
+        com.example.aura.data.repository.AuraPreferencesRepository(context.applicationContext)
+    }
+
     val repository: AuraRepository by lazy {
         AuraRepository(database)
     }
@@ -110,6 +114,10 @@ class AuraContainer(
 
     val voiceManager: VoiceInteractionManager by lazy {
         (customVoiceManager ?: VoiceInteractionManager(context.applicationContext)).apply {
+            speechRate = preferencesRepository.speechRate.value
+            speechPitch = preferencesRepository.speechPitch.value
+            selectedVoice = preferencesRepository.selectedVoiceName.value.ifBlank { null }
+            selectedLanguage = preferencesRepository.selectedLanguage.value
             setCallbacks(
                 onUserInput = { text ->
                     val activeSession = sessionManager.activeSession.value

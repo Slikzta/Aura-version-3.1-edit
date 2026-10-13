@@ -28,9 +28,9 @@ class AndroidDeviceActionsTool : AuraTool {
             ToolParameter(
                 name = "action",
                 type = "string",
-                description = "Action: 'copy_to_clipboard', 'vibrate', or 'open_settings'",
+                description = "Action: 'copy_to_clipboard', 'vibrate', 'open_settings', or 'launch_app'",
                 required = true,
-                enumValues = listOf("copy_to_clipboard", "vibrate", "open_settings")
+                enumValues = listOf("copy_to_clipboard", "vibrate", "open_settings", "launch_app")
             ),
             ToolParameter(
                 name = "text",
@@ -42,6 +42,12 @@ class AndroidDeviceActionsTool : AuraTool {
                 name = "duration_ms",
                 type = "integer",
                 description = "Vibration duration in milliseconds (default: 200ms)",
+                required = false
+            ),
+            ToolParameter(
+                name = "package_name",
+                type = "string",
+                description = "Target application package name when action is 'launch_app' (e.g. 'com.android.chrome')",
                 required = false
             )
         )
@@ -105,6 +111,21 @@ class AndroidDeviceActionsTool : AuraTool {
                     ToolExecutionResult.Success(
                         output = "Launched Android system settings activity.",
                         structuredData = mapOf("action_executed" to "open_settings")
+                    )
+                }
+                "launch_app" -> {
+                    val pkg = arguments["package_name"]?.toString()?.trim()
+                    if (pkg.isNullOrBlank()) {
+                        return ToolExecutionResult.Failure("Missing 'package_name' parameter for launch_app.")
+                    }
+                    val pm = appContext.packageManager
+                    val launchIntent = pm.getLaunchIntentForPackage(pkg)
+                        ?: return ToolExecutionResult.Failure("Could not find installed launchable application with package: '$pkg'")
+                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    appContext.startActivity(launchIntent)
+                    ToolExecutionResult.Success(
+                        output = "Successfully launched application: '$pkg'.",
+                        structuredData = mapOf("action_executed" to "launch_app", "package_name" to pkg)
                     )
                 }
                 else -> ToolExecutionResult.Failure("Unsupported device action: '$action'")

@@ -32,6 +32,11 @@ interface TextToSpeechEngine {
         onError: (String) -> Unit = {}
     )
 
+    fun getAvailableVoices(): List<String> = emptyList()
+    fun getAvailableLanguages(): List<Locale> = emptyList()
+    fun setVoice(voiceName: String): Boolean = false
+    fun setLanguage(locale: Locale): Boolean = false
+
     fun stop()
     fun shutdown()
 }
@@ -171,6 +176,43 @@ class AndroidTextToSpeechEngine(
             }
         } catch (e: Exception) {
             Log.w(TAG, "Error configuring TTS language", e)
+        }
+    }
+
+    override fun getAvailableVoices(): List<String> {
+        return try {
+            tts?.voices?.map { it.name }?.sorted() ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    override fun getAvailableLanguages(): List<Locale> {
+        return try {
+            tts?.availableLanguages?.toList()?.sortedBy { it.displayName } ?: listOf(Locale.US, Locale.UK, Locale.GERMANY, Locale.FRANCE)
+        } catch (e: Exception) {
+            listOf(Locale.US)
+        }
+    }
+
+    override fun setVoice(voiceName: String): Boolean {
+        return try {
+            val voice = tts?.voices?.firstOrNull { it.name.equals(voiceName, ignoreCase = true) }
+            if (voice != null) {
+                tts?.voice = voice
+                true
+            } else false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    override fun setLanguage(locale: Locale): Boolean {
+        return try {
+            val result = tts?.setLanguage(locale)
+            result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
+        } catch (e: Exception) {
+            false
         }
     }
 

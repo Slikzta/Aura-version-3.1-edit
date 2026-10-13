@@ -117,6 +117,67 @@ class AuraMainViewModel(
         }
     }
 
+    // Voice & Speech Settings
+    val speechRate: StateFlow<Float> = container.preferencesRepository.speechRate
+    val speechPitch: StateFlow<Float> = container.preferencesRepository.speechPitch
+    val selectedVoiceName: StateFlow<String> = container.preferencesRepository.selectedVoiceName
+    val selectedLanguage: StateFlow<String> = container.preferencesRepository.selectedLanguage
+    val continuousHandsFreeEnabled: StateFlow<Boolean> = container.preferencesRepository.continuousHandsFreeEnabled
+    val hapticFeedbackEnabled: StateFlow<Boolean> = container.preferencesRepository.hapticFeedbackEnabled
+    val isMuted: StateFlow<Boolean> = container.voiceManager.isMuted
+    val isPaused: StateFlow<Boolean> = container.voiceManager.isPaused
+
+    fun setSpeechRate(rate: Float) {
+        container.preferencesRepository.setSpeechRate(rate)
+        container.voiceManager.speechRate = rate
+    }
+
+    fun setSpeechPitch(pitch: Float) {
+        container.preferencesRepository.setSpeechPitch(pitch)
+        container.voiceManager.speechPitch = pitch
+    }
+
+    fun setSelectedVoice(voiceName: String) {
+        container.preferencesRepository.setSelectedVoiceName(voiceName)
+        container.voiceManager.selectedVoice = voiceName.ifBlank { null }
+        container.voiceManager.ttsEngine.setVoice(voiceName)
+    }
+
+    fun setSelectedLanguage(langCode: String) {
+        container.preferencesRepository.setSelectedLanguage(langCode)
+        container.voiceManager.selectedLanguage = langCode
+        try {
+            val locale = java.util.Locale.forLanguageTag(langCode)
+            container.voiceManager.ttsEngine.setLanguage(locale)
+        } catch (_: Exception) {}
+    }
+
+    fun setMuted(muted: Boolean) {
+        container.voiceManager.setMuted(muted)
+    }
+
+    fun pauseVoice() {
+        container.voiceManager.pauseConversation()
+    }
+
+    fun resumeVoice() {
+        container.voiceManager.resumeConversation()
+    }
+
+    fun previewVoice(sampleText: String = "Hello! I am Aura, your personal autonomous AI agent.") {
+        container.voiceManager.ttsEngine.speak(
+            com.example.aura.core.voice.SpeechSynthesisRequest(
+                text = sampleText,
+                voiceId = container.voiceManager.selectedVoice,
+                speechRate = container.voiceManager.speechRate,
+                pitch = container.voiceManager.speechPitch
+            )
+        )
+    }
+
+    fun getAvailableVoices(): List<String> = container.voiceManager.ttsEngine.getAvailableVoices()
+    fun getAvailableLanguages(): List<java.util.Locale> = container.voiceManager.ttsEngine.getAvailableLanguages()
+
     // Voice Engine Controls
     fun setVoiceMode(mode: VoiceMode) {
         if (mode == VoiceMode.CONTINUOUS_CONVERSATION) {
@@ -286,6 +347,10 @@ class AuraMainViewModel(
             _toolExecutionOutput.value = output
             container.auditLogger.logToolExecuted(activeSession.value.id, tool.name, result is ToolExecutionResult.Success, output, tool.securityLevel)
         }
+    }
+
+    fun testExecuteTool(toolId: String, args: Map<String, Any?> = emptyMap()) {
+        executeToolDirectly(toolId, args)
     }
 
     fun clearToolExecutionOutput() {

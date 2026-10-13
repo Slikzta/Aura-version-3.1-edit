@@ -31,11 +31,51 @@ class VoiceInteractionManager(
     private val _engineState = MutableStateFlow<VoiceEngineState>(VoiceEngineState.Idle)
     val engineState: StateFlow<VoiceEngineState> = _engineState.asStateFlow()
 
+    var speechRate: Float = 1.0f
+    var speechPitch: Float = 1.0f
+    var selectedVoice: String? = null
+    var selectedLanguage: String? = null
+
+    private val _isMuted = MutableStateFlow(false)
+    val isMuted: StateFlow<Boolean> = _isMuted.asStateFlow()
+
+    private val _isPaused = MutableStateFlow(false)
+    val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
+
     private var onUserInputReady: ((String) -> Unit)? = null
     private var onBargeInTriggered: (() -> Unit)? = null
 
     private var isContinuousRunning = false
     private var restartJob: Job? = null
+
+    fun setMuted(muted: Boolean) {
+        _isMuted.value = muted
+        if (muted) {
+            ttsEngine.stop()
+            _engineState.value = VoiceEngineState.Muted
+        } else if (_engineState.value is VoiceEngineState.Muted) {
+            _engineState.value = VoiceEngineState.Idle
+            if (isContinuousRunning && !_isPaused.value) {
+                startContinuousListeningCycle()
+            }
+        }
+    }
+
+    fun pauseConversation() {
+        _isPaused.value = true
+        restartJob?.cancel()
+        sttEngine.stopListening()
+        ttsEngine.stop()
+        audioCaptureManager.stopCapture()
+        _engineState.value = VoiceEngineState.Idle
+    }
+
+    fun resumeConversation() {
+        _isPaused.value = false
+        if (isContinuousRunning && !_isMuted.value) {
+            startContinuousListeningCycle()
+        }
+    }
 
     fun setCallbacks(onUserInput: (String) -> Unit, onBargeIn: () -> Unit) {
         this.onUserInputReady = onUserInput
@@ -217,6 +257,14 @@ class VoiceInteractionManager(
      * Called by Agent Core to speak response aloud when in Voice mode.
      */
     fun speakResponse(text: String, onFinished: () -> Unit = {}) {
+        if (_isMuted.value) {
+            onFinished()
+            if (isContinuousRunning && !_isPaused.value && _mode.value == VoiceMode.CONTINUOUS_CONVERSATION) {
+                startContinuousListeningCycle()
+            }
+            return
+        }
+
         // Prevent overlapping microphone capture and TTS playback
         restartJob?.cancel()
         restartJob = null
@@ -225,7 +273,12 @@ class VoiceInteractionManager(
 
         _engineState.value = VoiceEngineState.SynthesizingSpeech
         ttsEngine.speak(
-            request = SpeechSynthesisRequest(text = text),
+            request = SpeechSynthesisRequest(
+                text = text,
+                voiceId = selectedVoice,
+                speechRate = speechRate,
+                pitch = speechPitch
+            ),
             onStart = {
                 voiceScope.launch {
                     _engineState.value = VoiceEngineState.Speaking(0.1f)

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -63,6 +64,7 @@ enum class AuraNavDestination(val label: String, val icon: ImageVector) {
     AUTONOMOUS("Autonomous", Icons.Default.AccountTree),
     MEMORY("Memory", Icons.Default.Psychology),
     TOOLS("Tools", Icons.Default.Build),
+    SETTINGS("Settings", Icons.Default.Settings),
     AUDIT("Audit & Config", Icons.Default.Shield)
 }
 
@@ -165,6 +167,7 @@ fun AuraApp(
                 AuraNavDestination.AUTONOMOUS -> AutonomousScreen(viewModel = viewModel)
                 AuraNavDestination.MEMORY -> MemoryScreen(viewModel = viewModel)
                 AuraNavDestination.TOOLS -> ToolsScreen(viewModel = viewModel)
+                AuraNavDestination.SETTINGS -> com.example.aura.ui.screens.SettingsScreen(viewModel = viewModel)
                 AuraNavDestination.AUDIT -> AuditAndProvidersScreen(viewModel = viewModel)
             }
         }
