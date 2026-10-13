@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aura APK Download</title>
+    <style>
+        :root {
+            --primary: #4F46E5;
+            --primary-hover: #4338CA;
+            --bg: #0F172A;
+            --card-bg: #1E293B;
+            --text: #F8FAFC;
+            --text-secondary: #94A3B8;
+            --border: #334155;
+            --badge-bg: #312E81;
+            --badge-text: #A5B4FC;
+            --success: #10B981;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 16px;
+        }
+        .container {
+            max-width: 640px;
+            width: 100%;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 36px 28px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+            text-align: center;
+        }
+        .icon {
+            width: 72px;
+            height: 72px;
+            background: linear-gradient(135deg, #6366F1, #A855F7);
+            border-radius: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 16px rgba(99, 102, 241, 0.3);
+        }
+        h1 {
+            font-size: 26px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            font-size: 15px;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+        }
+        .badges {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 28px;
+            flex-wrap: wrap;
+        }
+        .badge {
+            background: var(--badge-bg);
+            color: var(--badge-text);
+            padding: 6px 14px;
+            border-radius: 9999px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .btn-download {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            background: var(--primary);
+            color: white;
+            text-decoration: none;
+            padding: 16px 36px;
+            border-radius: 14px;
+            font-size: 17px;
+            font-weight: 600;
+            width: 100%;
+            max-width: 360px;
+            transition: all 0.2s ease;
+            box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4);
+            margin-bottom: 28px;
+        }
+        .btn-download:hover {
+            background: var(--primary-hover);
+            transform: translateY(-2px);
+        }
+        .info-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 18px;
+            text-align: left;
+            margin-bottom: 24px;
+            font-size: 13px;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { color: var(--text-secondary); }
+        .info-value { font-family: monospace; color: #E2E8F0; word-break: break-all; }
+        .notes {
+            text-align: left;
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            border-top: 1px solid var(--border);
+            padding-top: 18px;
+        }
+        .notes h3 {
+            font-size: 14px;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">✨</div>
+        <h1>Aura Android Assistant</h1>
+        <p class="subtitle">Direct Build Artifact from Google AI Studio</p>
+
+        <div class="badges">
+            <span class="badge">Version 1.0.3</span>
+            <span class="badge">Build 4</span>
+            <span class="badge">24.1 MB</span>
+            <span class="badge" style="background:#064E3B; color:#6EE7B7;">Debug APK</span>
+        </div>
+
+        <a href="/app-debug.apk" download="app-debug.apk" class="btn-download">
+            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+            Download Aura APK
+        </a>
+
+        <div class="info-card">
+            <div class="info-row">
+                <span class="info-label">Application ID</span>
+                <span class="info-value">com.aistudio.aura.vqpzkm</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Target SDK</span>
+                <span class="info-value">Android 16 (SDK 36)</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">SHA-256 Checksum</span>
+                <span class="info-value">f3c450510deae7688e0ee3eea26f2792c01151a4e130b1418a0bb6a38a4cf4d6</span>
+            </div>
+        </div>
+
+        <div class="notes">
+            <h3>Installation Instructions</h3>
+            <ol style="padding-left: 20px;">
+                <li>Tap <strong>Download Aura APK</strong> on your Android phone or transfer the file to your device.</li>
+                <li>When prompted, allow <em>"Install unknown apps"</em> for your browser or file manager.</li>
+                <li>If Google Play Protect displays a warning for debug signing, tap <em>"More details"</em> &rarr; <em>"Install anyway"</em>.</li>
+                <li><strong>Note:</strong> If you previously installed a build from GitHub Actions, uninstall that version first to prevent signature conflict errors.</li>
+            </ol>
+        </div>
+    </div>
+</body>
+</html>
